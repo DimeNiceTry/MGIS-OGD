@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import MapLayer, MapView
+from .models import MapLayer, MapView, SearchableObject
 
 class MapLayerSerializer(serializers.ModelSerializer):
     class Meta:
@@ -11,4 +11,9 @@ class MapViewSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MapView
-        fields = '__all__' 
+        fields = '__all__'
+
+class SearchableObjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SearchableObject
+        fields = ['id', 'name', 'object_type', 'geometry', 'properties'] 

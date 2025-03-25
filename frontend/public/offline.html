@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <title>MGIS OGD - Offline</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            background-color: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 500px;
+        }
+        h1 {
+            color: #1890ff;
+            margin-bottom: 20px;
+        }
+        p {
+            color: #333;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        button {
+            background-color: #1890ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #40a9ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Нет подключения к интернету</h1>
+        <p>
+            К сожалению, вы не можете получить доступ к этой странице, так как ваше устройство не подключено к интернету.
+        </p>
+        <p>
+            Пожалуйста, проверьте ваше соединение и попробуйте снова.
+        </p>
+        <button onclick="window.location.reload()">Попробовать снова</button>
+    </div>
+</body>
+</html> 
