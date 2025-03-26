@@ -2,13 +2,17 @@ services:
   - type: web
     name: mgis-ogd-backend
     env: python
-    rootDir: .
-    buildCommand: chmod +x build.sh && ./build.sh
+    rootDir: backend
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      python manage.py collectstatic --noinput
+    startCommand: gunicorn wsgi:application
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: DJANGO_SETTINGS_MODULE
-        value: settings
+        value: backend.settings
       - key: SECRET_KEY
         generateValue: true
       - key: DEBUG
