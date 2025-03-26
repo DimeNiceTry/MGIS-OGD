@@ -149,6 +149,11 @@ const MapComponent = memo(({ mapContainer }) => {
   return <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />;
 });
 
+// Конфигурация API
+const API_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://your-production-api.com/api'  // Замените на ваш продакшн URL
+  : 'http://localhost:8000/api';
+
 const Map = () => {
   const mapContainer = useRef(null);
   const [form] = Form.useForm();
@@ -164,82 +169,271 @@ const Map = () => {
         return;
       }
 
-      // Удаляем предыдущий слой и источник, если они существуют
-      if (map.getLayer('nspd-search-layer')) {
-        map.removeLayer('nspd-search-layer');
-      }
-      if (map.getSource('nspd-search')) {
-        map.removeSource('nspd-search');
-      }
+      // Получаем границы видимой области карты
+      const bounds = map.getBounds();
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
 
       try {
-        const response = await axios.get('http://localhost:8000/api/nspd/thematic-search/', {
+        const response = await axios.get(`${API_URL}/nspd/thematic-search/`, {
           params: {
             query: values.query,
-            thematicSearch: values.thematicSearch
+            thematicSearch: values.thematicSearch,
+            north: ne.lat,
+            east: ne.lng,
+            south: sw.lat,
+            west: sw.lng
           }
         });
 
-        if (response.data.features && response.data.features.length > 0) {
-          map.addSource('nspd-search', {
-            type: 'geojson',
-            data: {
-              type: 'FeatureCollection',
-              features: response.data.features
-            }
-          });
+        console.log('Ответ от API:', response.data);
 
-          map.addLayer({
-            id: 'nspd-search-layer',
-            type: 'fill',
-            source: 'nspd-search',
-            paint: {
-              'fill-color': '#088',
-              'fill-opacity': 0.8
-            }
-          });
+        // Проверяем наличие данных и features
+        if (response.data.data && response.data.data.data && response.data.data.data.features) {
+          const features = response.data.data.data.features;
+          console.log('Найдено features:', features.length);
 
-          // Приближаем карту к найденным объектам
-          const bounds = new maplibregl.LngLatBounds();
-          let hasValidCoordinates = false;
-          
-          response.data.features.forEach(feature => {
+          // Преобразуем координаты из EPSG:3857 в EPSG:4326
+          const transformedFeatures = features.map(feature => {
+            console.log('Исходная геометрия:', feature.geometry);
             if (feature.geometry && feature.geometry.coordinates) {
-              if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
-                feature.geometry.coordinates.forEach(coord => {
-                  if (Array.isArray(coord[0])) {
-                    coord.forEach(c => {
-                      if (c && c.length >= 2) {
-                        bounds.extend(c);
-                        hasValidCoordinates = true;
-                      }
-                    });
-                  } else if (coord && coord.length >= 2) {
-                    bounds.extend(coord);
-                    hasValidCoordinates = true;
-                  }
-                });
+              const transformedGeometry = { ...feature.geometry };
+              
+              if (feature.geometry.type === 'Point') {
+                const [x, y] = feature.geometry.coordinates;
+                // Проверяем, что координаты являются числами
+                if (typeof x === 'number' && typeof y === 'number') {
+                  transformedGeometry.coordinates = [
+                    x / 1000000, // Преобразование из EPSG:3857 в EPSG:4326
+                    y / 1000000
+                  ];
+                  console.log('Преобразованные координаты точки:', transformedGeometry.coordinates);
+                } else {
+                  console.error('Некорректные координаты точки:', feature.geometry.coordinates);
+                  return null;
+                }
+              } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                try {
+                  transformedGeometry.coordinates = feature.geometry.coordinates.map(ring => {
+                    if (Array.isArray(ring)) {
+                      return ring.map(coord => {
+                        if (Array.isArray(coord) && coord.length >= 2 && 
+                            typeof coord[0] === 'number' && typeof coord[1] === 'number') {
+                          return [
+                            coord[0] / 1000000,
+                            coord[1] / 1000000
+                          ];
+                        }
+                        return null;
+                      }).filter(coord => coord !== null);
+                    }
+                    return null;
+                  }).filter(ring => ring !== null && ring.length > 0);
+                  
+                  console.log('Преобразованные координаты полигона:', transformedGeometry.coordinates);
+                } catch (error) {
+                  console.error('Ошибка при обработке полигона:', error);
+                  return null;
+                }
               }
+              
+              return {
+                ...feature,
+                geometry: transformedGeometry
+              };
             }
-          });
-          
-          if (hasValidCoordinates) {
-            map.fitBounds(bounds, { padding: 50 });
+            return null;
+          }).filter(feature => feature !== null);
+
+          console.log('Преобразовано features:', transformedFeatures.length);
+
+          if (transformedFeatures.length > 0) {
+            // Удаляем предыдущие слои и источник, если они существуют
+            const layers = [
+              'nspd-land-layer',
+              'nspd-buildings-layer',
+              'nspd-structures-layer',
+              'nspd-points-layer',
+              'nspd-special-zones-layer',
+              'nspd-cultural-heritage-layer'
+            ];
+            
+            layers.forEach(layerId => {
+              if (map.getLayer(layerId)) {
+                map.removeLayer(layerId);
+              }
+            });
+            
+            if (map.getSource('nspd-search')) {
+              map.removeSource('nspd-search');
+            }
+
+            // Добавляем новый источник и слои
+            map.addSource('nspd-search', {
+              type: 'geojson',
+              data: {
+                type: 'FeatureCollection',
+                features: transformedFeatures
+              }
+            });
+
+            // Добавляем слой для земельных участков (полигоны)
+            map.addLayer({
+              id: 'nspd-land-layer',
+              type: 'fill',
+              source: 'nspd-search',
+              filter: ['all',
+                ['any', 
+                  ['==', ['geometry-type'], 'Polygon'],
+                  ['==', ['geometry-type'], 'MultiPolygon']
+                ],
+                ['==', ['get', 'categoryName'], 'Земельные участки ЕГРН']
+              ],
+              paint: {
+                'fill-color': '#088',
+                'fill-opacity': 0.8,
+                'fill-outline-color': '#000'
+              }
+            });
+
+            // Добавляем слой для зданий (полигоны)
+            map.addLayer({
+              id: 'nspd-buildings-layer',
+              type: 'fill',
+              source: 'nspd-search',
+              filter: ['all',
+                ['any', 
+                  ['==', ['geometry-type'], 'Polygon'],
+                  ['==', ['geometry-type'], 'MultiPolygon']
+                ],
+                ['==', ['get', 'categoryName'], 'Здания']
+              ],
+              paint: {
+                'fill-color': '#f00',
+                'fill-opacity': 0.8,
+                'fill-outline-color': '#000'
+              }
+            });
+
+            // Добавляем слой для сооружений (полигоны)
+            map.addLayer({
+              id: 'nspd-structures-layer',
+              type: 'fill',
+              source: 'nspd-search',
+              filter: ['all',
+                ['any', 
+                  ['==', ['geometry-type'], 'Polygon'],
+                  ['==', ['geometry-type'], 'MultiPolygon']
+                ],
+                ['==', ['get', 'categoryName'], 'Сооружения']
+              ],
+              paint: {
+                'fill-color': '#0f0',
+                'fill-opacity': 0.8,
+                'fill-outline-color': '#000'
+              }
+            });
+
+            // Добавляем слой для зон с особыми условиями (полигоны)
+            map.addLayer({
+              id: 'nspd-special-zones-layer',
+              type: 'fill',
+              source: 'nspd-search',
+              filter: ['all',
+                ['any', 
+                  ['==', ['geometry-type'], 'Polygon'],
+                  ['==', ['geometry-type'], 'MultiPolygon']
+                ],
+                ['==', ['get', 'categoryName'], 'Зоны с особыми условиями использования территории']
+              ],
+              paint: {
+                'fill-color': '#ff0',
+                'fill-opacity': 0.5,
+                'fill-outline-color': '#000'
+              }
+            });
+
+            // Добавляем слой для объектов культурного наследия (полигоны)
+            map.addLayer({
+              id: 'nspd-cultural-heritage-layer',
+              type: 'fill',
+              source: 'nspd-search',
+              filter: ['all',
+                ['any', 
+                  ['==', ['geometry-type'], 'Polygon'],
+                  ['==', ['geometry-type'], 'MultiPolygon']
+                ],
+                ['==', ['get', 'categoryName'], 'Территории объектов культурного наследия, включенных в единый государственный реестр объектов культурного наследия (памятников истории и культуры) народов Российской Федерации']
+              ],
+              paint: {
+                'fill-color': '#f0f',
+                'fill-opacity': 0.5,
+                'fill-outline-color': '#000'
+              }
+            });
+
+            // Добавляем слой для точек (все типы)
+            map.addLayer({
+              id: 'nspd-points-layer',
+              type: 'circle',
+              source: 'nspd-search',
+              filter: ['==', ['geometry-type'], 'Point'],
+              paint: {
+                'circle-radius': 6,
+                'circle-color': '#000',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#fff'
+              }
+            });
+
+            // Приближаем карту к найденным объектам
+            const bounds = new maplibregl.LngLatBounds();
+            let hasValidCoordinates = false;
+            
+            transformedFeatures.forEach(feature => {
+              if (feature.geometry && feature.geometry.coordinates) {
+                if (feature.geometry.type === 'Point') {
+                  bounds.extend(feature.geometry.coordinates);
+                  hasValidCoordinates = true;
+                } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                  feature.geometry.coordinates.forEach(ring => {
+                    if (Array.isArray(ring[0])) {
+                      ring.forEach(coord => {
+                        if (coord && coord.length >= 2) {
+                          bounds.extend(coord);
+                          hasValidCoordinates = true;
+                        }
+                      });
+                    } else if (ring && ring.length >= 2) {
+                      bounds.extend(ring);
+                      hasValidCoordinates = true;
+                    }
+                  });
+                }
+              }
+            });
+            
+            if (hasValidCoordinates) {
+              map.fitBounds(bounds, { padding: 50 });
+            }
+            
+            message.success(`Найдено объектов: ${transformedFeatures.length}`);
+          } else {
+            message.info('Объекты не найдены');
           }
-          
-          message.success(`Найдено объектов: ${response.data.features.length}`);
         } else {
-          message.info('Объекты не найдены');
+          console.error('Некорректная структура ответа:', response.data);
+          message.error('Ошибка при обработке данных');
         }
       } catch (error) {
         console.error('Error fetching data:', error);
         message.error('Ошибка при поиске объектов');
+      } finally {
+        setLoading(false);
       }
     } catch (error) {
       console.error('Error in search function:', error);
       message.error('Произошла ошибка');
-    } finally {
-      setLoading(false);
     }
   }, []);
 

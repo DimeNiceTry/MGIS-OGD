@@ -8,6 +8,7 @@ import json
 import requests
 import logging
 import urllib3
+import time
 
 # Отключаем предупреждения о небезопасном SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -26,6 +27,27 @@ NSPD_HEADERS = {
     'Connection': 'keep-alive'
 }
 
+def make_nspd_request(base_url, params, max_retries=3, delay=2):
+    for attempt in range(max_retries):
+        try:
+            logger.debug(f"Попытка {attempt + 1} из {max_retries}")
+            response = requests.get(
+                base_url,
+                params=params,
+                headers=NSPD_HEADERS,
+                verify=False,
+                timeout=60
+            )
+            response.raise_for_status()
+            return response
+        except (requests.exceptions.RequestException, requests.exceptions.ConnectionError) as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Ошибка при попытке {attempt + 1}: {str(e)}")
+                time.sleep(delay)
+                continue
+            raise
+    return None
+
 @require_http_methods(["GET"])
 def get_map_layers(request):
     layers = list(MapLayer.objects.values())
@@ -43,7 +65,14 @@ def thematic_search(request):
     query = request.GET.get('query', '')
     thematic_search = request.GET.get('thematicSearch', '')
     
+    # Получаем параметры границ
+    north = request.GET.get('north')
+    east = request.GET.get('east')
+    south = request.GET.get('south')
+    west = request.GET.get('west')
+    
     logger.debug(f"Параметры запроса - Query: {query}, ThematicSearch: {thematic_search}")
+    logger.debug(f"Границы: north={north}, east={east}, south={south}, west={west}")
     
     # Словарь соответствий для тематического поиска
     THEMATIC_SEARCH_MAPPING = {
@@ -71,26 +100,42 @@ def thematic_search(request):
             "thematicSearchId": thematic_search_id,
         }
         
+        # Добавляем параметры границ, если они предоставлены
+        if all([north, east, south, west]):
+            params.update({
+                "north": north,
+                "east": east,
+                "south": south,
+                "west": west
+            })
+        
         logger.debug(f"Сформированный URL для запроса к NSPD: {base_url} с параметрами {params}")
         
-        # Делаем запрос к NSPD с заголовками и увеличенным таймаутом
+        # Делаем запрос к NSPD с повторными попытками
         logger.debug("Отправка запроса к NSPD API...")
-        response = requests.get(
-            base_url,
-            params=params,
-            headers=NSPD_HEADERS,
-            verify=False,
-            timeout=60
-        )
-        logger.debug(f"Получен ответ от NSPD API. Статус: {response.status_code}")
+        response = make_nspd_request(base_url, params)
         
-        response.raise_for_status()
+        if response is None:
+            return JsonResponse({'error': "Failed to get response from NSPD API after multiple attempts"}, status=500)
+            
+        logger.debug(f"Получен ответ от NSPD API. Статус: {response.status_code}")
         
         # Получаем данные
         data = response.json()
         logger.debug(f"Успешно получены данные от NSPD API")
+        logger.debug(f"Структура ответа: {json.dumps(data, indent=2, ensure_ascii=False)}")
         
-        return JsonResponse(data)
+        # Проверяем структуру данных
+        if 'data' not in data:
+            logger.error("В ответе отсутствует поле 'data'")
+            return JsonResponse({'error': 'Invalid response format: missing data field'}, status=500)
+            
+        if 'features' not in data['data']:
+            logger.error("В ответе отсутствует поле 'features'")
+            return JsonResponse({'error': 'Invalid response format: missing features'}, status=500)
+        
+        # Оборачиваем данные в объект с полем data для соответствия формату фронтенда
+        return JsonResponse({'data': data})
         
     except requests.exceptions.RequestException as e:
         logger.error(f"Ошибка при запросе к NSPD API: {str(e)}")
