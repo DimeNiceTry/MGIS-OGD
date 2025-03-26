@@ -4,6 +4,7 @@ services:
     env: python
     rootDir: backend
     buildCommand: |
+      pip install --upgrade pip
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
     startCommand: gunicorn backend.wsgi:application
