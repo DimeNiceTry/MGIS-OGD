@@ -2,12 +2,12 @@ services:
   - type: web
     name: mgis-ogd-backend
     env: python
-    rootDir: backend
+    rootDir: .
     buildCommand: |
       pip install --upgrade pip
-      pip install -e .
-      python manage.py collectstatic --noinput
-    startCommand: gunicorn wsgi:application
+      pip install -r requirements.txt
+      python backend/manage.py collectstatic --noinput
+    startCommand: cd backend && gunicorn wsgi:application
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
