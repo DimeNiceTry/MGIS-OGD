@@ -6,8 +6,8 @@ services:
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
-      PYTHONPATH=$PYTHONPATH:. python manage.py collectstatic --noinput
-    startCommand: PYTHONPATH=$PYTHONPATH:. gunicorn backend.wsgi:application
+      python manage.py collectstatic --noinput
+    startCommand: gunicorn wsgi:application
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
