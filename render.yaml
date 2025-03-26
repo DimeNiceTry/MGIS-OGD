@@ -14,7 +14,7 @@ services:
       - key: DJANGO_SETTINGS_MODULE
         value: backend.settings
       - key: SECRET_KEY
-        generateValue: true
+        value: "django-insecure-render-production-secret-key-2024"
       - key: DEBUG
         value: false
       - key: ALLOWED_HOSTS
