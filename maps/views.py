@@ -61,6 +61,7 @@ def get_map_views(request):
 @require_http_methods(["GET"])
 def thematic_search(request):
     logger.debug(f"Получен запрос тематического поиска: {request.GET}")
+    logger.debug(f"Заголовки запроса: {request.headers}")
     
     query = request.GET.get('query', '')
     thematic_search = request.GET.get('thematicSearch', '')
@@ -116,9 +117,11 @@ def thematic_search(request):
         response = make_nspd_request(base_url, params)
         
         if response is None:
+            logger.error("Не удалось получить ответ от NSPD API после нескольких попыток")
             return JsonResponse({'error': "Failed to get response from NSPD API after multiple attempts"}, status=500)
             
         logger.debug(f"Получен ответ от NSPD API. Статус: {response.status_code}")
+        logger.debug(f"Заголовки ответа NSPD: {response.headers}")
         
         # Получаем данные
         data = response.json()

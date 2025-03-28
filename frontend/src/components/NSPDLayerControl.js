@@ -35,7 +35,7 @@ const NSPDLayerControl = ({ map }) => {
         mapInstance.removeSource('nspd-search');
       }
       
-      const response = await axios.get('http://localhost:8000/api/nspd/thematic-search/', {
+      const response = await axios.get('https://mgis-ogd.onrender.com/api/nspd/thematic-search/', {
         params: {
           query: values.query,
           thematicSearch: values.thematicSearch
