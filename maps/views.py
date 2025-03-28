@@ -125,17 +125,8 @@ def thematic_search(request):
         logger.debug(f"Успешно получены данные от NSPD API")
         logger.debug(f"Структура ответа: {json.dumps(data, indent=2, ensure_ascii=False)}")
         
-        # Проверяем структуру данных
-        if 'data' not in data:
-            logger.error("В ответе отсутствует поле 'data'")
-            return JsonResponse({'error': 'Invalid response format: missing data field'}, status=500)
-            
-        if 'features' not in data['data']:
-            logger.error("В ответе отсутствует поле 'features'")
-            return JsonResponse({'error': 'Invalid response format: missing features'}, status=500)
-        
-        # Оборачиваем данные в объект с полем data для соответствия формату фронтенда
-        return JsonResponse({'data': data})
+        # Возвращаем данные как есть, без преобразования структуры
+        return JsonResponse(data)
         
     except requests.exceptions.RequestException as e:
         logger.error(f"Ошибка при запросе к NSPD API: {str(e)}")

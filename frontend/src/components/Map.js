@@ -149,6 +149,14 @@ const MapComponent = memo(({ mapContainer }) => {
   return <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />;
 });
 
+// Добавляем функцию корректного преобразования из EPSG:3857 в EPSG:4326
+const transformWebMercatorToWGS84 = (x, y) => {
+  const lng = (x * 180) / 20037508.34;
+  let lat = (y * 180) / 20037508.34;
+  lat = (180 / Math.PI) * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
+  return [lng, lat];
+};
+
 // Конфигурация API
 const API_URL = process.env.NODE_ENV === 'production' 
   ? 'https://your-production-api.com/api'  // Замените на ваш продакшн URL
@@ -186,11 +194,35 @@ const Map = () => {
           }
         });
 
-        console.log('Ответ от API:', response.data);
+        console.log('Полный ответ от API:', response);
+        console.log('Ответ от API (data):', response.data);
 
-        // Проверяем наличие данных и features
-        if (response.data.data && response.data.data.data && response.data.data.data.features) {
-          const features = response.data.data.data.features;
+        // Получаем features из ответа, проверяя разные структуры данных
+        let features = null;
+        
+        // Пробуем различные структуры данных
+        if (response.data && response.data.features) {
+          console.log('Используем структуру: response.data.features');
+          features = response.data.features;
+        } else if (response.data && response.data.data && response.data.data.features) {
+          console.log('Используем структуру: response.data.data.features');
+          features = response.data.data.features;
+        } else if (response.data && response.data.data && response.data.data.data && response.data.data.data.features) {
+          console.log('Используем структуру: response.data.data.data.features');
+          features = response.data.data.data.features;
+        } else if (response.data && response.data.type === 'FeatureCollection' && response.data.features) {
+          console.log('Используем структуру: response.data.features (FeatureCollection)');
+          features = response.data.features;
+        }
+        
+        if (!features) {
+          console.error('Структура данных не соответствует ожидаемым форматам:', response.data);
+          message.error('Неизвестная структура ответа от API');
+          setLoading(false);
+          return;
+        }
+        
+        if (features && features.length > 0) {
           console.log('Найдено features:', features.length);
 
           // Преобразуем координаты из EPSG:3857 в EPSG:4326
@@ -203,10 +235,7 @@ const Map = () => {
                 const [x, y] = feature.geometry.coordinates;
                 // Проверяем, что координаты являются числами
                 if (typeof x === 'number' && typeof y === 'number') {
-                  transformedGeometry.coordinates = [
-                    x / 1000000, // Преобразование из EPSG:3857 в EPSG:4326
-                    y / 1000000
-                  ];
+                  transformedGeometry.coordinates = transformWebMercatorToWGS84(x, y);
                   console.log('Преобразованные координаты точки:', transformedGeometry.coordinates);
                 } else {
                   console.error('Некорректные координаты точки:', feature.geometry.coordinates);
@@ -219,10 +248,7 @@ const Map = () => {
                       return ring.map(coord => {
                         if (Array.isArray(coord) && coord.length >= 2 && 
                             typeof coord[0] === 'number' && typeof coord[1] === 'number') {
-                          return [
-                            coord[0] / 1000000,
-                            coord[1] / 1000000
-                          ];
+                          return transformWebMercatorToWGS84(coord[0], coord[1]);
                         }
                         return null;
                       }).filter(coord => coord !== null);
