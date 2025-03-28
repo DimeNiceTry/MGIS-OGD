@@ -158,9 +158,7 @@ const transformWebMercatorToWGS84 = (x, y) => {
 };
 
 // Конфигурация API
-const API_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://your-production-api.com/api'  // Замените на ваш продакшн URL
-  : 'http://localhost:8000/api';
+const API_URL = 'https://mgis-ogd.onrender.com/api';
 
 const Map = () => {
   const mapContainer = useRef(null);

@@ -131,7 +131,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+CORS_ALLOWED_ORIGINS = [
+    'https://dimenicetry.github.io',
+    'http://localhost:3000'
+]
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -145,6 +148,7 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000  # 1 год
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+    CSRF_TRUSTED_ORIGINS = ['https://dimenicetry.github.io']
 
 # REST Framework settings
 REST_FRAMEWORK = {
