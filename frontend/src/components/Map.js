@@ -158,7 +158,7 @@ const transformWebMercatorToWGS84 = (x, y) => {
 };
 
 // Конфигурация API
-const API_URL = 'https://mgis-ogd.onrender.com/api';
+const API_BASE_URL = 'https://mgis-ogd.onrender.com/api';
 
 const Map = () => {
   const mapContainer = useRef(null);
@@ -180,15 +180,26 @@ const Map = () => {
       const ne = bounds.getNorthEast();
       const sw = bounds.getSouthWest();
 
+      console.log('Отправляем запрос на:', `${API_BASE_URL}/nspd/thematic-search/`);
+      console.log('Параметры запроса:', {
+        query: values.query,
+        thematicSearch: values.thematicSearch,
+        north: ne.lat,
+        east: ne.lng,
+        south: sw.lat,
+        west: sw.lng
+      });
+
       try {
-        const response = await axios.get(`${API_URL}/nspd/thematic-search/`, {
+        const response = await axios.get(`${API_BASE_URL}/nspd/thematic-search/`, {
           params: {
             query: values.query,
             thematicSearch: values.thematicSearch,
             north: ne.lat,
             east: ne.lng,
             south: sw.lat,
-            west: sw.lng
+            west: sw.lng,
+            _v: Date.now()
           }
         });
 
