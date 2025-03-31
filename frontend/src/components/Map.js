@@ -115,15 +115,41 @@ const API_BASE_URL = 'https://mgis-ogd.onrender.com/api';
 
 // Проверяем загрузку стилей
 const checkStylesLoaded = () => {
+  console.log('Проверка загрузки стилей MapLibre GL...');
+  
+  // Проверяем наличие стилей в head
   const styleSheet = document.querySelector('link[href*="maplibre-gl.css"]');
-  if (!styleSheet) {
-    // Пробуем добавить стили программно
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css';
-    document.head.appendChild(link);
+  if (styleSheet) {
+    console.log('Стили MapLibre GL найдены в head');
     return true;
   }
+
+  // Проверяем наличие стилей в body
+  const styleSheetInBody = document.querySelector('body link[href*="maplibre-gl.css"]');
+  if (styleSheetInBody) {
+    console.log('Стили MapLibre GL найдены в body');
+    return true;
+  }
+
+  console.log('Стили не найдены, добавляем программно...');
+  
+  // Пробуем добавить стили программно
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css';
+  link.onload = () => {
+    console.log('Стили MapLibre GL успешно загружены');
+    // Проверяем, что стили действительно применились
+    const checkStyle = document.createElement('div');
+    checkStyle.className = 'maplibregl-map';
+    document.body.appendChild(checkStyle);
+    const computedStyle = window.getComputedStyle(checkStyle);
+    console.log('Проверка стилей maplibregl-map:', computedStyle);
+    document.body.removeChild(checkStyle);
+  };
+  link.onerror = (e) => console.error('Ошибка загрузки стилей MapLibre GL:', e);
+  document.head.appendChild(link);
+  
   return true;
 };
 
@@ -136,15 +162,23 @@ const Map = () => {
 
   // Инициализация карты
   useEffect(() => {
-    if (mapInstance) return;
+    console.log('Начало инициализации карты');
+    console.log('mapContainer.current:', mapContainer.current);
+    
+    if (mapInstance) {
+      console.log('Карта уже инициализирована');
+      return;
+    }
 
     // Проверяем загрузку стилей
     if (!checkStylesLoaded()) {
+      console.error('Стили не загружены');
       setError('Ошибка загрузки стилей карты');
       return;
     }
 
     try {
+      console.log('Создание экземпляра карты...');
       const map = new maplibregl.Map({
         container: mapContainer.current,
         style: {
@@ -169,8 +203,12 @@ const Map = () => {
         },
         center: [37.6173, 55.7558], // Москва
         zoom: 10,
-        preserveDrawingBuffer: true
+        preserveDrawingBuffer: true,
+        fadeDuration: 0,
+        trackResize: true
       });
+
+      console.log('Карта создана, добавляем обработчики событий...');
 
       map.on('error', (e) => {
         console.error('Ошибка карты:', e);
@@ -181,11 +219,36 @@ const Map = () => {
         console.log('Карта успешно загружена');
         setMapInstance(map);
         setError(null);
+        
+        // Принудительно обновляем размер карты
+        map.resize();
       });
 
+      map.on('style.load', () => {
+        console.log('Стиль карты загружен');
+        // Принудительно обновляем размер карты после загрузки стиля
+        map.resize();
+      });
+
+      map.on('render', () => {
+        if (map.loaded() && !map.isMoving()) {
+          console.log('Карта отрендерена');
+        }
+      });
+
+      map.on('tile.load', () => {
+        console.log('Тайл загружен');
+      });
+
+      map.on('tile.error', (e) => {
+        console.error('Ошибка загрузки тайла:', e);
+      });
+
+      console.log('Добавляем элементы управления...');
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
       return () => {
+        console.log('Очистка карты...');
         if (map) {
           map.remove();
         }
@@ -562,10 +625,27 @@ const Map = () => {
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
+    <div style={{ 
+      width: '100%', 
+      height: '100%', 
+      position: 'relative',
+      overflow: 'hidden',
+      backgroundColor: '#f0f2f5'
+    }}>
       <SearchPanel form={form} loading={loading} onSearch={onSearch} />
       {mapInstance && <GMLLayerViewer map={mapInstance} gmlFilePath="layer_category_39892.gml" />}
-      <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+      <div 
+        ref={mapContainer} 
+        style={{ 
+          width: '100%', 
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          zIndex: 0,
+          display: 'block'
+        }} 
+      />
     </div>
   );
 };
