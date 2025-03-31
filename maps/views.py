@@ -9,6 +9,8 @@ import requests
 import logging
 import urllib3
 import time
+import hashlib
+from django.core.cache import cache
 
 # Отключаем предупреждения о небезопасном SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -27,7 +29,19 @@ NSPD_HEADERS = {
     'Connection': 'keep-alive'
 }
 
+# Функция для создания хэша запроса для кэширования
+def get_cache_key(base_url, params):
+    param_str = json.dumps(params, sort_keys=True)
+    return f"nspd_api:{hashlib.md5(f'{base_url}:{param_str}'.encode()).hexdigest()}"
+
 def make_nspd_request(base_url, params, max_retries=3, delay=2):
+    # Проверяем кэш перед запросом
+    cache_key = get_cache_key(base_url, params)
+    cached_response = cache.get(cache_key)
+    if cached_response:
+        logger.debug(f"Возвращаем кэшированный результат для запроса: {base_url}")
+        return cached_response
+    
     for attempt in range(max_retries):
         try:
             logger.debug(f"Попытка {attempt + 1} из {max_retries}")
@@ -36,15 +50,21 @@ def make_nspd_request(base_url, params, max_retries=3, delay=2):
                 params=params,
                 headers=NSPD_HEADERS,
                 verify=False,
-                timeout=60
+                timeout=20  # Уменьшаем таймаут с 60 до 20 секунд
             )
             response.raise_for_status()
-            return response
+            
+            # Кэшируем результат на 1 час
+            result = response.json()
+            cache.set(cache_key, result, 60 * 60)  # 1 час кэширования
+            
+            return result
         except (requests.exceptions.RequestException, requests.exceptions.ConnectionError) as e:
             if attempt < max_retries - 1:
                 logger.warning(f"Ошибка при попытке {attempt + 1}: {str(e)}")
                 time.sleep(delay)
                 continue
+            logger.error(f"Все попытки запроса к NSPD API завершились неудачей: {str(e)}")
             raise
     return None
 
@@ -61,7 +81,6 @@ def get_map_views(request):
 @require_http_methods(["GET"])
 def thematic_search(request):
     logger.debug(f"Получен запрос тематического поиска: {request.GET}")
-    logger.debug(f"Заголовки запроса: {request.headers}")
     
     query = request.GET.get('query', '')
     thematic_search = request.GET.get('thematicSearch', '')
@@ -97,7 +116,7 @@ def thematic_search(request):
         base_url = "https://nspd.gov.ru/api/geoportal/v2/search/geoportal"
         params = {
             "query": query,
-            "limit": 200,
+            "limit": 50,  # Уменьшаем лимит с 200 до 50
             "thematicSearchId": thematic_search_id,
         }
         
@@ -112,34 +131,54 @@ def thematic_search(request):
         
         logger.debug(f"Сформированный URL для запроса к NSPD: {base_url} с параметрами {params}")
         
-        # Делаем запрос к NSPD с повторными попытками
+        # Проверяем кэш
+        cache_key = get_cache_key(base_url, params)
+        cached_result = cache.get(cache_key)
+        
+        if cached_result:
+            logger.debug("Возвращаем результат из кэша")
+            return JsonResponse(cached_result)
+        
+        # Делаем запрос к NSPD
         logger.debug("Отправка запроса к NSPD API...")
-        response = make_nspd_request(base_url, params)
-        
-        if response is None:
-            logger.error("Не удалось получить ответ от NSPD API после нескольких попыток")
-            return JsonResponse({'error': "Failed to get response from NSPD API after multiple attempts"}, status=500)
+        try:
+            result = make_nspd_request(base_url, params)
             
-        logger.debug(f"Получен ответ от NSPD API. Статус: {response.status_code}")
-        logger.debug(f"Заголовки ответа NSPD: {response.headers}")
+            if result is None:
+                logger.error("Не удалось получить ответ от NSPD API после нескольких попыток")
+                return JsonResponse({'error': "Failed to get response from NSPD API after multiple attempts"}, status=500)
+            
+            logger.debug(f"Успешно получены данные от NSPD API")
+            
+            # Возвращаем данные
+            return JsonResponse(result)
+            
+        except requests.exceptions.Timeout:
+            logger.error("Таймаут при запросе к NSPD API")
+            return JsonResponse({'error': "NSPD API request timed out"}, status=504)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при запросе к NSPD API: {str(e)}")
+            return JsonResponse({'error': f"Error requesting NSPD API: {str(e)}"}, status=500)
         
-        # Получаем данные
-        data = response.json()
-        logger.debug(f"Успешно получены данные от NSPD API")
-        logger.debug(f"Структура ответа: {json.dumps(data, indent=2, ensure_ascii=False)}")
-        
-        # Возвращаем данные как есть, без преобразования структуры
-        return JsonResponse(data)
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка при запросе к NSPD API: {str(e)}")
-        logger.error(f"Тип ошибки: {type(e).__name__}")
-        return JsonResponse({'error': f"Error requesting NSPD API: {str(e)}"}, status=500)
     except json.JSONDecodeError as e:
         logger.error(f"Ошибка декодирования ответа NSPD: {str(e)}")
-        logger.error(f"Содержимое ответа: {response.text}")
         return JsonResponse({'error': f"Invalid JSON response: {str(e)}"}, status=500)
     except Exception as e:
         logger.error(f"Неожиданная ошибка: {str(e)}")
         logger.error(f"Тип ошибки: {type(e).__name__}")
         return JsonResponse({'error': f"Unexpected error: {str(e)}"}, status=500)
+
+@require_http_methods(["GET"])
+def nspd_fallback(request):
+    """
+    Возвращает заглушку с пустыми данными в формате FeatureCollection,
+    когда основной API НСПД недоступен
+    """
+    logger.info("Использую заглушку для НСПД API")
+    empty_response = {
+        "type": "FeatureCollection",
+        "features": [],
+        "fallback": True,
+        "message": "Данные НСПД в настоящее время недоступны. Пожалуйста, попробуйте позже."
+    }
+    return JsonResponse(empty_response)

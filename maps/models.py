@@ -6,7 +6,7 @@ class MapLayer(models.Model):
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     source_type = models.CharField(max_length=50)  # vector, raster, etc.
-    source_url = models.URLField()
+    source_url = models.CharField(max_length=255)  # Может содержать как URL, так и локальный путь
     style = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

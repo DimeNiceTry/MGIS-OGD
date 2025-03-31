@@ -2,6 +2,139 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { message, Button, Spin, Progress, Radio } from 'antd';
 
+// Делаем функцию конвертации статической
+const convertGMLtoGeoJSON = (xmlDoc) => {
+  console.log('Начало конвертации GML в GeoJSON');
+  const featureCollection = {
+    type: 'FeatureCollection',
+    features: []
+  };
+  
+  // Получаем все элементы category_39892
+  const categoryElements = xmlDoc.getElementsByTagName('category_39892');
+  console.log(`Найдено элементов category_39892: ${categoryElements.length}`);
+  
+  for (let i = 0; i < categoryElements.length; i++) {
+    const el = categoryElements[i];
+    const fid = el.getAttribute('fid');
+    console.log(`Обработка элемента ${i + 1}, fid: ${fid}`);
+    
+    const typeEl = el.getElementsByTagName('type')[0];
+    const geomType = typeEl ? typeEl.textContent : 'MultiPolygon';
+    console.log(`Тип геометрии: ${geomType}`);
+    
+    const geolocEl = el.getElementsByTagName('geoloc')[0];
+    if (!geolocEl) {
+      console.log(`Элемент ${fid} не содержит geoloc`);
+      continue;
+    }
+    
+    // Получаем координаты из GML
+    let coordinates = [];
+    let geometry = null;
+    
+    if (geomType === 'MultiPolygon') {
+      const multiPolygons = geolocEl.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'MultiPolygon');
+      console.log(`Найдено MultiPolygon: ${multiPolygons.length}`);
+      
+      if (multiPolygons.length > 0) {
+        const polygonMembers = multiPolygons[0].getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'polygonMember');
+        console.log(`Найдено polygonMember: ${polygonMembers.length}`);
+        
+        coordinates = Array.from(polygonMembers).map((polygonMember, index) => {
+          const polygon = polygonMember.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'Polygon')[0];
+          if (!polygon) {
+            console.log(`Полигон ${index} не найден`);
+            return null;
+          }
+          
+          const outerBoundary = polygon.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'outerBoundaryIs')[0];
+          if (!outerBoundary) {
+            console.log(`Внешняя граница полигона ${index} не найдена`);
+            return null;
+          }
+          
+          const linearRing = outerBoundary.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'LinearRing')[0];
+          if (!linearRing) {
+            console.log(`LinearRing полигона ${index} не найден`);
+            return null;
+          }
+          
+          const coords = linearRing.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'coordinates')[0];
+          if (!coords) {
+            console.log(`Координаты полигона ${index} не найдены`);
+            return null;
+          }
+          
+          const parsedCoords = [parseCoordinates(coords.textContent)];
+          console.log(`Полигон ${index} содержит ${parsedCoords[0].length} точек`);
+          return parsedCoords;
+        }).filter(coord => coord !== null);
+        
+        if (coordinates.length > 0) {
+          geometry = {
+            type: 'MultiPolygon',
+            coordinates: coordinates
+          };
+          console.log(`Создана геометрия MultiPolygon с ${coordinates.length} полигонами`);
+        } else {
+          console.log('Не удалось создать геометрию MultiPolygon: нет валидных полигонов');
+        }
+      } else {
+        console.log('MultiPolygon не найден в элементе');
+      }
+    }
+    
+    if (geometry) {
+      featureCollection.features.push({
+        type: 'Feature',
+        id: fid,
+        geometry: geometry,
+        properties: {
+          fid: fid,
+          type: geomType
+        }
+      });
+      console.log(`Добавлен feature с id ${fid}`);
+    } else {
+      console.log(`Не удалось создать feature для элемента ${fid}`);
+    }
+  }
+  
+  console.log(`Всего создано features: ${featureCollection.features.length}`);
+  return featureCollection;
+};
+
+// Делаем функцию парсинга координат статической
+const parseCoordinates = (coordsString) => {
+  console.log('Парсинг координат:', coordsString.substring(0, 100) + '...');
+  const coords = coordsString.trim().split(' ').map(coord => {
+    const [x, y] = coord.split(',');
+    const parsedX = parseFloat(x);
+    const parsedY = parseFloat(y);
+    
+    if (isNaN(parsedX) || isNaN(parsedY)) {
+      console.log('Некорректные координаты:', coord);
+      return null;
+    }
+    
+    const transformed = transformWebMercatorToWGS84(parsedX, parsedY);
+    console.log(`Координаты ${coord} преобразованы в ${transformed}`);
+    return transformed;
+  }).filter(coord => coord !== null);
+  
+  console.log(`Обработано ${coords.length} координат`);
+  return coords;
+};
+
+// Делаем функцию трансформации координат статической
+const transformWebMercatorToWGS84 = (x, y) => {
+  const lng = (x * 180) / 20037508.34;
+  let lat = (y * 180) / 20037508.34;
+  lat = (180 / Math.PI) * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
+  return [lng, lat];
+};
+
 const GMLLayerViewer = ({ map, gmlFilePath }) => {
   const [loading, setLoading] = useState(false);
   const [layerAdded, setLayerAdded] = useState(false);
@@ -205,82 +338,6 @@ const GMLLayerViewer = ({ map, gmlFilePath }) => {
     }
   };
 
-  // Функция для конвертации GML в GeoJSON
-  const convertGMLtoGeoJSON = (xmlDoc) => {
-    const featureCollection = {
-      type: 'FeatureCollection',
-      features: []
-    };
-    
-    // Получаем все элементы category_39892
-    const categoryElements = xmlDoc.getElementsByTagName('category_39892');
-    
-    for (let i = 0; i < categoryElements.length; i++) {
-      const el = categoryElements[i];
-      const fid = el.getAttribute('fid');
-      const typeEl = el.getElementsByTagName('type')[0];
-      const geomType = typeEl ? typeEl.textContent : 'MultiPolygon';
-      const geolocEl = el.getElementsByTagName('geoloc')[0];
-      
-      if (!geolocEl) continue;
-      
-      // Получаем координаты из GML
-      let coordinates = [];
-      let geometry = null;
-      
-      if (geomType === 'MultiPolygon') {
-        const multiPolygons = geolocEl.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'MultiPolygon');
-        if (multiPolygons.length > 0) {
-          const polygonMembers = multiPolygons[0].getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'polygonMember');
-          coordinates = Array.from(polygonMembers).map(polygonMember => {
-            const polygon = polygonMember.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'Polygon')[0];
-            const outerBoundary = polygon.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'outerBoundaryIs')[0];
-            const linearRing = outerBoundary.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'LinearRing')[0];
-            const coords = linearRing.getElementsByTagNameNS('http://www.opengis.net/gml/3.2', 'coordinates')[0];
-            
-            return [parseCoordinates(coords.textContent)];
-          });
-          
-          geometry = {
-            type: 'MultiPolygon',
-            coordinates: coordinates
-          };
-        }
-      }
-      
-      if (geometry) {
-        // Добавляем объект в FeatureCollection
-        featureCollection.features.push({
-          type: 'Feature',
-          id: Number(fid),
-          properties: {
-            fid: fid
-          },
-          geometry: geometry
-        });
-      }
-    }
-    
-    return featureCollection;
-  };
-
-  // Функция для разбора строки координат из GML
-  const parseCoordinates = (coordsString) => {
-    return coordsString.trim().split(' ').map(pair => {
-      const [x, y] = pair.split(',').map(Number);
-      // Преобразуем координаты из EPSG:3857 в EPSG:4326 (широта/долгота)
-      return transformWebMercatorToWGS84(x, y);
-    });
-  };
-
-  // Функция преобразования из EPSG:3857 в EPSG:4326
-  const transformWebMercatorToWGS84 = (x, y) => {
-    const lng = (x * 180) / 20037508.34;
-    let lat = (y * 180) / 20037508.34;
-    lat = (180 / Math.PI) * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
-    return [lng, lat];
-  };
-
   // Функция для получения границ данных
   const getBoundsFromGeoJSON = (geoJSON) => {
     if (!geoJSON || !geoJSON.features || geoJSON.features.length === 0) {
@@ -451,7 +508,9 @@ const GMLLayerViewer = ({ map, gmlFilePath }) => {
   };
 
   useEffect(() => {
-    // При монтировании компонента не загружаем файл автоматически
+    if (map && gmlFilePath) {
+      loadGMLFile();
+    }
   }, [map, gmlFilePath]);
 
   return (
@@ -492,5 +551,10 @@ const GMLLayerViewer = ({ map, gmlFilePath }) => {
     </div>
   );
 };
+
+// Экспортируем статические функции
+GMLLayerViewer.convertGMLtoGeoJSON = convertGMLtoGeoJSON;
+GMLLayerViewer.parseCoordinates = parseCoordinates;
+GMLLayerViewer.transformWebMercatorToWGS84 = transformWebMercatorToWGS84;
 
 export default GMLLayerViewer; 
