@@ -117,8 +117,12 @@ const API_BASE_URL = 'https://mgis-ogd.onrender.com/api';
 const checkStylesLoaded = () => {
   const styleSheet = document.querySelector('link[href*="maplibre-gl.css"]');
   if (!styleSheet) {
-    console.error('Стили MapLibre GL не загружены');
-    return false;
+    // Пробуем добавить стили программно
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css';
+    document.head.appendChild(link);
+    return true;
   }
   return true;
 };
