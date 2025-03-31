@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/MGIS-OGD/static/css/main.082e75b3.css",
-    "main.js": "/MGIS-OGD/static/js/main.27a46cba.js",
+    "main.js": "/MGIS-OGD/static/js/main.14821894.js",
     "static/js/453.8ab44547.chunk.js": "/MGIS-OGD/static/js/453.8ab44547.chunk.js",
     "index.html": "/MGIS-OGD/index.html",
     "main.082e75b3.css.map": "/MGIS-OGD/static/css/main.082e75b3.css.map",
-    "main.27a46cba.js.map": "/MGIS-OGD/static/js/main.27a46cba.js.map",
+    "main.14821894.js.map": "/MGIS-OGD/static/js/main.14821894.js.map",
     "453.8ab44547.chunk.js.map": "/MGIS-OGD/static/js/453.8ab44547.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.082e75b3.css",
-    "static/js/main.27a46cba.js"
+    "static/js/main.14821894.js"
   ]
 }
