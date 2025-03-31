@@ -185,11 +185,75 @@ const Map = () => {
     console.log('Карта загружена в Map компоненте');
     setMapInstance(map);
 
+    // Проверка, размещено ли приложение на GitHub Pages
+    const isGitHubPages = window.location.hostname.includes('github.io');
+    
+    if (isGitHubPages) {
+      message.info('Приложение размещено на GitHub Pages. Большие файлы данных недоступны, используйте локальную версию или загрузите свои данные.');
+    }
+
     // Загружаем предустановленные слои
     for (const layer of predefinedLayers) {
       if (layer.path) {
         try {
           console.log(`Загрузка слоя: ${layer.name} (${layer.path})`);
+          
+          // Если это GitHub Pages, не пытаемся загрузить большие файлы
+          if (isGitHubPages) {
+            // Создаем тестовый слой с примером данных вместо реальных
+            const testGeoJSON = {
+              "type": "FeatureCollection",
+              "features": [
+                {
+                  "type": "Feature",
+                  "properties": { 
+                    "name": layer.name,
+                    "note": "Тестовые данные для GitHub Pages"
+                  },
+                  "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                      [
+                        [37.5173, 55.6558],
+                        [37.7273, 55.6558],
+                        [37.7273, 55.8658],
+                        [37.5173, 55.8658],
+                        [37.5173, 55.6558]
+                      ]
+                    ]
+                  }
+                }
+              ]
+            };
+            
+            // Добавляем тестовый слой на карту
+            map.addSource(layer.id, {
+              type: 'geojson',
+              data: testGeoJSON
+            });
+            
+            map.addLayer({
+              id: layer.id,
+              type: 'fill',
+              source: layer.id,
+              paint: {
+                'fill-color': '#FF9800',
+                'fill-opacity': 0.5,
+                'fill-outline-color': '#000'
+              },
+              layout: {
+                visibility: 'visible'
+              }
+            });
+            
+            // Добавляем слой в список видимых слоев
+            setVisibleLayers(prev => {
+              const newLayers = [...prev, layer.id];
+              return newLayers;
+            });
+            
+            continue;
+          }
           
           // Используем только два основных пути - прямой и через корень сайта
           const pathsToTry = [
