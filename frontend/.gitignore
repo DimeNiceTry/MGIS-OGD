@@ -21,3 +21,7 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Большие файлы данных
+/public/media/*.geojson
+/public/media/*.gml
