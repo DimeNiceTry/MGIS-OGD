@@ -39,8 +39,29 @@ const NSPDLayerControl = ({ map }) => {
         params: {
           query: values.query,
           thematicSearch: values.thematicSearch
-        }
+        },
+        timeout: 15000 // 15 секунд таймаут
       });
+      
+      // Проверяем наличие сообщения об ошибке от бэкенда
+      if (response.data && response.data.error) {
+        console.error('Ошибка API:', response.data.error);
+        message.error(`Ошибка: ${response.data.error}`);
+        
+        // Пробуем использовать fallback API
+        console.log('Пробуем использовать fallback API...');
+        try {
+          const fallbackResponse = await axios.get('https://mgis-ogd.onrender.com/api/nspd/fallback/');
+          if (fallbackResponse.data && fallbackResponse.data.message) {
+            message.warning(fallbackResponse.data.message);
+          }
+          response.data = fallbackResponse.data;
+        } catch (fallbackError) {
+          console.error('Ошибка при запросе к fallback API:', fallbackError);
+          setLoading(false);
+          return;
+        }
+      }
       
       setSearchResults(response.data);
       
@@ -69,8 +90,19 @@ const NSPDLayerControl = ({ map }) => {
         message.info('Объекты не найдены');
       }
     } catch (error) {
-      console.error('Error searching NSPD:', error);
-      message.error('Ошибка при поиске');
+      console.error('Ошибка при запросе к API:', error);
+      
+      // Пробуем использовать fallback API
+      console.log('Произошла ошибка, пробуем использовать fallback API...');
+      try {
+        const fallbackResponse = await axios.get('https://mgis-ogd.onrender.com/api/nspd/fallback/');
+        if (fallbackResponse.data && fallbackResponse.data.message) {
+          message.warning(fallbackResponse.data.message);
+        }
+      } catch (fallbackError) {
+        console.error('Ошибка при запросе к fallback API:', fallbackError);
+        message.error('Не удалось получить данные от API');
+      }
     } finally {
       setLoading(false);
     }

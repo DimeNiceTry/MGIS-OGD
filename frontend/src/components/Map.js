@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Form, Input, Select, Button, message } from 'antd';
 import axios from 'axios';
+import GMLLayerViewer from './GMLLayerViewer';
 
 // Защита от циклических перезагрузок
 const MAX_RELOAD_COUNT = 3;
@@ -101,54 +102,6 @@ const SearchPanel = memo(({ form, loading, onSearch }) => (
   </div>
 ));
 
-const MapComponent = memo(({ mapContainer }) => {
-  const map = useRef(null);
-
-  useEffect(() => {
-    if (map.current) return;
-
-    map.current = new maplibregl.Map({
-      container: mapContainer.current,
-      style: {
-        version: 8,
-        sources: {
-          'osm': {
-            type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            attribution: '© OpenStreetMap contributors'
-          }
-        },
-        layers: [
-          {
-            id: 'osm',
-            type: 'raster',
-            source: 'osm',
-            minzoom: 0,
-            maxzoom: 19
-          }
-        ]
-      },
-      center: [37.6173, 55.7558], // Москва
-      zoom: 10
-    });
-
-    map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-    
-    // Сохраняем ссылку на карту в DOM-элементе для доступа извне
-    mapContainer.current._map = map.current;
-
-    return () => {
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
-      }
-    };
-  }, [mapContainer]);
-
-  return <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />;
-});
-
 // Добавляем функцию корректного преобразования из EPSG:3857 в EPSG:4326
 const transformWebMercatorToWGS84 = (x, y) => {
   const lng = (x * 180) / 20037508.34;
@@ -160,23 +113,96 @@ const transformWebMercatorToWGS84 = (x, y) => {
 // Конфигурация API
 const API_BASE_URL = 'https://mgis-ogd.onrender.com/api';
 
+// Проверяем загрузку стилей
+const checkStylesLoaded = () => {
+  const styleSheet = document.querySelector('link[href*="maplibre-gl.css"]');
+  if (!styleSheet) {
+    console.error('Стили MapLibre GL не загружены');
+    return false;
+  }
+  return true;
+};
+
 const Map = () => {
   const mapContainer = useRef(null);
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [mapInstance, setMapInstance] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Инициализация карты
+  useEffect(() => {
+    if (mapInstance) return;
+
+    // Проверяем загрузку стилей
+    if (!checkStylesLoaded()) {
+      setError('Ошибка загрузки стилей карты');
+      return;
+    }
+
+    try {
+      const map = new maplibregl.Map({
+        container: mapContainer.current,
+        style: {
+          version: 8,
+          sources: {
+            'osm': {
+              type: 'raster',
+              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tileSize: 256,
+              attribution: '© OpenStreetMap contributors'
+            }
+          },
+          layers: [
+            {
+              id: 'osm',
+              type: 'raster',
+              source: 'osm',
+              minzoom: 0,
+              maxzoom: 19
+            }
+          ]
+        },
+        center: [37.6173, 55.7558], // Москва
+        zoom: 10,
+        preserveDrawingBuffer: true
+      });
+
+      map.on('error', (e) => {
+        console.error('Ошибка карты:', e);
+        setError('Ошибка инициализации карты');
+      });
+
+      map.on('load', () => {
+        console.log('Карта успешно загружена');
+        setMapInstance(map);
+        setError(null);
+      });
+
+      map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+      return () => {
+        if (map) {
+          map.remove();
+        }
+      };
+    } catch (err) {
+      console.error('Ошибка при создании карты:', err);
+      setError('Ошибка при создании карты');
+    }
+  }, [mapInstance]);
 
   const onSearch = useCallback(async (values) => {
     setLoading(true);
     try {
-      // Получаем ссылку на карту из сохраненного свойства
-      const map = mapContainer.current?._map;
-      if (!map) {
+      // Заменяем получение ссылки на карту
+      if (!mapInstance) {
         console.error('Map reference not found');
         return;
       }
 
       // Получаем границы видимой области карты
-      const bounds = map.getBounds();
+      const bounds = mapInstance.getBounds();
       const ne = bounds.getNorthEast();
       const sw = bounds.getSouthWest();
 
@@ -200,11 +226,32 @@ const Map = () => {
             south: sw.lat,
             west: sw.lng,
             _v: Date.now()
-          }
+          },
+          timeout: 15000 // 15 секунд таймаут
         });
 
         console.log('Полный ответ от API:', response);
         console.log('Ответ от API (data):', response.data);
+        
+        // Проверяем наличие сообщения об ошибке от бэкенда
+        if (response.data && response.data.error) {
+          console.error('Ошибка API:', response.data.error);
+          message.error(`Ошибка: ${response.data.error}`);
+          
+          // Пробуем использовать fallback API
+          console.log('Пробуем использовать fallback API...');
+          try {
+            const fallbackResponse = await axios.get(`${API_BASE_URL}/nspd/fallback/`);
+            if (fallbackResponse.data && fallbackResponse.data.message) {
+              message.warning(fallbackResponse.data.message);
+            }
+            response.data = fallbackResponse.data;
+          } catch (fallbackError) {
+            console.error('Ошибка при запросе к fallback API:', fallbackError);
+            setLoading(false);
+            return;
+          }
+        }
 
         // Получаем features из ответа, проверяя разные структуры данных
         let features = null;
@@ -294,17 +341,17 @@ const Map = () => {
             ];
             
             layers.forEach(layerId => {
-              if (map.getLayer(layerId)) {
-                map.removeLayer(layerId);
+              if (mapInstance.getLayer(layerId)) {
+                mapInstance.removeLayer(layerId);
               }
             });
             
-            if (map.getSource('nspd-search')) {
-              map.removeSource('nspd-search');
+            if (mapInstance.getSource('nspd-search')) {
+              mapInstance.removeSource('nspd-search');
             }
 
             // Добавляем новый источник и слои
-            map.addSource('nspd-search', {
+            mapInstance.addSource('nspd-search', {
               type: 'geojson',
               data: {
                 type: 'FeatureCollection',
@@ -313,7 +360,7 @@ const Map = () => {
             });
 
             // Добавляем слой для земельных участков (полигоны)
-            map.addLayer({
+            mapInstance.addLayer({
               id: 'nspd-land-layer',
               type: 'fill',
               source: 'nspd-search',
@@ -332,7 +379,7 @@ const Map = () => {
             });
 
             // Добавляем слой для зданий (полигоны)
-            map.addLayer({
+            mapInstance.addLayer({
               id: 'nspd-buildings-layer',
               type: 'fill',
               source: 'nspd-search',
@@ -351,7 +398,7 @@ const Map = () => {
             });
 
             // Добавляем слой для сооружений (полигоны)
-            map.addLayer({
+            mapInstance.addLayer({
               id: 'nspd-structures-layer',
               type: 'fill',
               source: 'nspd-search',
@@ -370,7 +417,7 @@ const Map = () => {
             });
 
             // Добавляем слой для зон с особыми условиями (полигоны)
-            map.addLayer({
+            mapInstance.addLayer({
               id: 'nspd-special-zones-layer',
               type: 'fill',
               source: 'nspd-search',
@@ -389,7 +436,7 @@ const Map = () => {
             });
 
             // Добавляем слой для объектов культурного наследия (полигоны)
-            map.addLayer({
+            mapInstance.addLayer({
               id: 'nspd-cultural-heritage-layer',
               type: 'fill',
               source: 'nspd-search',
@@ -408,7 +455,7 @@ const Map = () => {
             });
 
             // Добавляем слой для точек (все типы)
-            map.addLayer({
+            mapInstance.addLayer({
               id: 'nspd-points-layer',
               type: 'circle',
               source: 'nspd-search',
@@ -449,7 +496,7 @@ const Map = () => {
             });
             
             if (hasValidCoordinates) {
-              map.fitBounds(bounds, { padding: 50 });
+              mapInstance.fitBounds(bounds, { padding: 50 });
             }
             
             message.success(`Найдено объектов: ${transformedFeatures.length}`);
@@ -461,21 +508,60 @@ const Map = () => {
           message.error('Ошибка при обработке данных');
         }
       } catch (error) {
-        console.error('Error fetching data:', error);
-        message.error('Ошибка при поиске объектов');
+        console.error('Ошибка при запросе к API:', error);
+        
+        // Пробуем использовать fallback API
+        console.log('Произошла ошибка, пробуем использовать fallback API...');
+        try {
+          const fallbackResponse = await axios.get(`${API_BASE_URL}/nspd/fallback/`);
+          if (fallbackResponse.data && fallbackResponse.data.message) {
+            message.warning(fallbackResponse.data.message);
+          }
+        } catch (fallbackError) {
+          console.error('Ошибка при запросе к fallback API:', fallbackError);
+          message.error('Не удалось получить данные от API');
+        }
       } finally {
         setLoading(false);
       }
     } catch (error) {
-      console.error('Error in search function:', error);
-      message.error('Произошла ошибка');
+      console.error('Unexpected error:', error);
+      message.error('Произошла неожиданная ошибка');
+      setLoading(false);
     }
-  }, []);
+  }, [mapInstance]);
+
+  if (error) {
+    return (
+      <div style={{ 
+        width: '100vw', 
+        height: '100vh', 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        background: '#f0f2f5'
+      }}>
+        <div style={{ 
+          padding: '20px',
+          background: 'white',
+          borderRadius: '8px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}>
+          <h2 style={{ color: '#ff4d4f', marginBottom: '10px' }}>Ошибка загрузки карты</h2>
+          <p>{error}</p>
+          <Button type="primary" onClick={() => window.location.reload()}>
+            Перезагрузить страницу
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ width: '100%', height: '100vh', position: 'relative' }}>
-      <MapComponent mapContainer={mapContainer} />
+    <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
       <SearchPanel form={form} loading={loading} onSearch={onSearch} />
+      {mapInstance && <GMLLayerViewer map={mapInstance} gmlFilePath="layer_category_39892.gml" />}
+      <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
     </div>
   );
 };
