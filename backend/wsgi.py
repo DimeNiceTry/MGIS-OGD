@@ -12,9 +12,11 @@ import sys
 
 # Add the current directory to the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
+# Изменяем настройки с backend.settings на просто settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
 
 application = get_wsgi_application()

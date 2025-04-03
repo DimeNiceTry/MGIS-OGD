@@ -138,7 +138,18 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
     'https://dimenicetry.github.io',
-    'http://localhost:3000'
+    'http://localhost:3000',
+    'http://localhost:80',
+    'http://localhost',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:80',
+    'http://127.0.0.1'
+]
+
+# Также добавим CORS_ALLOWED_ORIGIN_REGEXES для большей гибкости
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://localhost(:[0-9]+)?$",
+    r"^http://127\.0\.0\.1(:[0-9]+)?$"
 ]
 
 CORS_ALLOW_CREDENTIALS = True

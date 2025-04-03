@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - ./static:/app/staticfiles
+      - ./media:/app/media
+      - ./db.sqlite3:/app/db.sqlite3
+      - ./maps:/app/maps
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes:
+      - frontend_build:/app/build
+      - ./frontend/public/media:/app/public/media
+    environment:
+      - NODE_ENV=production
+      - PUBLIC_URL=/
+      - GENERATE_SOURCEMAP=false
+    depends_on:
+      - backend
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    volumes:
+      - ./static:/app/staticfiles
+      - ./media:/app/media
+      - frontend_build:/usr/share/nginx/html
+      - ./frontend/public/media:/usr/share/nginx/html/media
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  frontend_build:
+    driver: local 

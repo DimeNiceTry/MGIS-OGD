@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Form, Input, Select, Button, message } from 'antd';
+import { Form, Input, Select, Button, message, Spin } from 'antd';
 import axios from 'axios';
 import GMLLayerViewer from './GMLLayerViewer';
 import LayerControl from './LayerControl';
@@ -167,12 +167,57 @@ const transformWebMercatorToWGS84 = (x, y) => {
 // Конфигурация API
 const API_BASE_URL = 'https://mgis-ogd.onrender.com/api';
 
+// Добавляем localStorage для кэширования
+const LOCAL_STORAGE_PREFIX = 'mgis_ogs_cache_';
+const CACHE_EXPIRATION = 7 * 24 * 60 * 60 * 1000; // 7 дней в миллисекундах
+
+// Функция для сохранения данных в кэш
+const saveToCache = (key, data) => {
+  try {
+    const cacheItem = {
+      timestamp: Date.now(),
+      data: data
+    };
+    localStorage.setItem(LOCAL_STORAGE_PREFIX + key, JSON.stringify(cacheItem));
+    console.log(`Данные слоя ${key} кэшированы успешно`);
+    return true;
+  } catch (error) {
+    console.warn(`Не удалось кэшировать данные слоя ${key}:`, error);
+    return false;
+  }
+};
+
+// Функция для получения данных из кэша
+const getFromCache = (key) => {
+  try {
+    const cacheItemStr = localStorage.getItem(LOCAL_STORAGE_PREFIX + key);
+    if (!cacheItemStr) return null;
+    
+    const cacheItem = JSON.parse(cacheItemStr);
+    
+    // Проверяем срок годности кэша
+    if (Date.now() - cacheItem.timestamp > CACHE_EXPIRATION) {
+      console.log(`Кэш слоя ${key} устарел, удаляем`);
+      localStorage.removeItem(LOCAL_STORAGE_PREFIX + key);
+      return null;
+    }
+    
+    console.log(`Данные слоя ${key} загружены из кэша`);
+    return cacheItem.data;
+  } catch (error) {
+    console.warn(`Ошибка при получении данных из кэша для слоя ${key}:`, error);
+    return null;
+  }
+};
+
 const Map = () => {
   const mapContainer = useRef(null);
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [mapInstance, setMapInstance] = useState(null);
   const [visibleLayers, setVisibleLayers] = useState([]);
+  const [layersLoading, setLayersLoading] = useState({});
+
   const [predefinedLayers, setPredefinedLayers] = useState([
     { 
       id: 'category_39892', 
@@ -191,12 +236,21 @@ const Map = () => {
     if (isGitHubPages) {
       message.info('Приложение размещено на GitHub Pages. Большие файлы данных недоступны, используйте локальную версию или загрузите свои данные.');
     }
-
+    
+    // Получаем текущий hostname для создания абсолютного пути
+    // Это поможет обеспечить одинаковую работу и на localhost, и на 127.0.0.1
+    const currentHostname = window.location.hostname;
+    const currentPort = window.location.port ? `:${window.location.port}` : '';
+    const currentProtocol = window.location.protocol;
+    
     // Загружаем предустановленные слои
     for (const layer of predefinedLayers) {
       if (layer.path) {
         try {
           console.log(`Загрузка слоя: ${layer.name} (${layer.path})`);
+          
+          // Отмечаем слой как загружаемый
+          setLayersLoading(prev => ({...prev, [layer.id]: true}));
           
           // Если это GitHub Pages, не пытаемся загрузить большие файлы
           if (isGitHubPages) {
@@ -252,13 +306,54 @@ const Map = () => {
               return newLayers;
             });
             
+            // Помечаем слой как загруженный
+            setLayersLoading(prev => ({...prev, [layer.id]: false}));
+            
             continue;
           }
           
-          // Используем только два основных пути - прямой и через корень сайта
+          // Сначала проверяем кэш
+          const cachedData = getFromCache(layer.id);
+          if (cachedData) {
+            console.log(`Используем кэшированные данные для слоя ${layer.name}`);
+            
+            // Добавляем кэшированный слой на карту
+            map.addSource(layer.id, {
+              type: 'geojson',
+              data: cachedData
+            });
+            
+            map.addLayer({
+              id: layer.id,
+              type: 'fill',
+              source: layer.id,
+              paint: {
+                'fill-color': '#4CAF50',
+                'fill-opacity': 0.5,
+                'fill-outline-color': '#000'
+              },
+              layout: {
+                visibility: 'visible'
+              }
+            });
+            
+            // Добавляем слой в список видимых слоев
+            setVisibleLayers(prev => {
+              const newLayers = [...prev, layer.id];
+              return newLayers;
+            });
+            
+            // Помечаем слой как загруженный
+            setLayersLoading(prev => ({...prev, [layer.id]: false}));
+            
+            continue;
+          }
+          
+          // Используем абсолютный и относительный пути для проверки
           const pathsToTry = [
-            layer.path,
-            layer.path.startsWith('/') ? layer.path.substring(1) : `/${layer.path}`
+            layer.path, // Относительный путь
+            layer.path.startsWith('/') ? layer.path.substring(1) : `/${layer.path}`, // Альтернативный относительный путь
+            `${currentProtocol}//${currentHostname}${currentPort}${layer.path.startsWith('/') ? layer.path : `/${layer.path}`}` // Абсолютный путь
           ];
           
           let response = null;
@@ -268,11 +363,17 @@ const Map = () => {
           for (const path of pathsToTry) {
             try {
               console.log(`Пробуем путь: ${path}`);
+              
+              // Добавляем случайный параметр для предотвращения кэширования браузером при необходимости
+              const cacheBuster = path.includes('?') ? `&_=${new Date().getTime()}` : `?_=${new Date().getTime()}`;
+              const url = `${path}${cacheBuster}`;
+              
               // Используем axios для загрузки
-              const tempResponse = await axios.get(path, {
+              const tempResponse = await axios.get(url, {
                 responseType: 'text',
                 headers: {
-                  'Accept': 'application/json, text/plain, */*'
+                  'Accept': 'application/json, text/plain, */*',
+                  'Cache-Control': 'no-cache'
                 },
                 validateStatus: status => status < 400
               });
@@ -341,6 +442,10 @@ const Map = () => {
             });
             
             message.warning(`Не удалось загрузить слой ${layer.name}, отображен тестовый полигон`);
+            
+            // Помечаем слой как загруженный
+            setLayersLoading(prev => ({...prev, [layer.id]: false}));
+            
             continue;
           }
           
@@ -361,8 +466,39 @@ const Map = () => {
               
               geoJSON = JSON.parse(contentText);
               console.log(`Файл GeoJSON загружен, количество features: ${geoJSON.features ? geoJSON.features.length : 0}`);
+              
+              // Кэшируем полученные данные
+              saveToCache(layer.id, geoJSON);
+              
+              // Добавляем слой на карту
+              map.addSource(layer.id, {
+                type: 'geojson',
+                data: geoJSON
+              });
+              
+              map.addLayer({
+                id: layer.id,
+                type: 'fill',
+                source: layer.id,
+                paint: {
+                  'fill-color': '#4CAF50',
+                  'fill-opacity': 0.5,
+                  'fill-outline-color': '#000'
+                },
+                layout: {
+                  visibility: 'visible'
+                }
+              });
+              
+              // Добавляем слой в список видимых слоев
+              setVisibleLayers(prev => {
+                const newLayers = [...prev, layer.id];
+                console.log('Текущие видимые слои:', newLayers);
+                return newLayers;
+              });
+              
             } catch (jsonError) {
-              console.error('Ошибка при разборе JSON');
+              console.error('Ошибка при разборе JSON', jsonError);
               
               // Создаем тестовый полигон
               geoJSON = {
@@ -386,6 +522,35 @@ const Map = () => {
                   }
                 ]
               };
+              
+              // Добавляем слой на карту
+              map.addSource(layer.id, {
+                type: 'geojson',
+                data: geoJSON
+              });
+              
+              map.addLayer({
+                id: layer.id,
+                type: 'fill',
+                source: layer.id,
+                paint: {
+                  'fill-color': '#FF9800',
+                  'fill-opacity': 0.5,
+                  'fill-outline-color': '#000'
+                },
+                layout: {
+                  visibility: 'visible'
+                }
+              });
+              
+              // Добавляем слой в список видимых слоев
+              setVisibleLayers(prev => {
+                const newLayers = [...prev, layer.id];
+                console.log('Текущие видимые слои:', newLayers);
+                return newLayers;
+              });
+              
+              message.warning(`Ошибка при обработке GeoJSON файла для слоя ${layer.name}`);
             }
           } else if (isGML) {
             // Загружаем GML и конвертируем в GeoJSON
@@ -480,60 +645,16 @@ const Map = () => {
               });
             }
           }
+
+          // Помечаем слой как загруженный
+          setLayersLoading(prev => ({...prev, [layer.id]: false}));
+          
         } catch (error) {
           console.error(`Ошибка при загрузке слоя ${layer.name}:`, error);
           message.error(`Не удалось загрузить слой ${layer.name}`);
           
-          // Создаем тестовый слой для визуализации
-          const testGeoJSON = {
-            "type": "FeatureCollection",
-            "features": [
-              {
-                "type": "Feature",
-                "properties": { "source": "error-fallback" },
-                "geometry": {
-                  "type": "Polygon",
-                  "coordinates": [
-                    [
-                      [37.6173, 55.7558],
-                      [37.6273, 55.7558],
-                      [37.6273, 55.7658],
-                      [37.6173, 55.7658],
-                      [37.6173, 55.7558]
-                    ]
-                  ]
-                }
-              }
-            ]
-          };
-          
-          // Создаем визуализацию на карте, только если слой не существует
-          if (!map.getSource(layer.id)) {
-            map.addSource(layer.id, {
-              type: 'geojson',
-              data: testGeoJSON
-            });
-            
-            map.addLayer({
-              id: layer.id,
-              type: 'fill',
-              source: layer.id,
-              paint: {
-                'fill-color': '#FF5722',
-                'fill-opacity': 0.5,
-                'fill-outline-color': '#000'
-              },
-              layout: {
-                visibility: 'visible'
-              }
-            });
-            
-            // Добавляем слой в список видимых слоев
-            setVisibleLayers(prev => {
-              const newLayers = [...prev, layer.id];
-              return newLayers;
-            });
-          }
+          // Помечаем слой как загруженный (с ошибкой)
+          setLayersLoading(prev => ({...prev, [layer.id]: false}));
         }
       }
     }
@@ -912,6 +1033,28 @@ const Map = () => {
     }
   }, []);
 
+  // Компонент индикатора загрузки слоев
+  const LayerLoadingIndicator = () => {
+    const anyLayerLoading = Object.values(layersLoading).some(status => status);
+    
+    if (!anyLayerLoading) return null;
+    
+    return (
+      <div style={{
+        position: 'absolute',
+        bottom: '20px',
+        right: '20px',
+        background: 'rgba(255, 255, 255, 0.8)',
+        padding: '10px',
+        borderRadius: '4px',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+        zIndex: 2
+      }}>
+        <Spin size="small" /> <span style={{ marginLeft: '10px' }}>Загрузка слоев...</span>
+      </div>
+    );
+  };
+
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative' }}>
       <MapComponent mapContainer={mapContainer} onMapLoad={onMapLoad} />
@@ -922,6 +1065,7 @@ const Map = () => {
         onLayerToggle={handleLayerToggle}
         onFileUpload={handleFileUpload}
       />
+      <LayerLoadingIndicator />
     </div>
   );
 };
