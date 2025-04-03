@@ -49,3 +49,7 @@ frontend/yarn-error.log*
 .vscode/
 *.swp
 *.swo 
+
+# Large files
+frontend/public/static/layer_category_39892.geojson
+frontend/public/static/layer_category_39892.gml 
