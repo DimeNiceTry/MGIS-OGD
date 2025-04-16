@@ -25,3 +25,5 @@ yarn-error.log*
 # Большие файлы данных
 /public/media/*.geojson
 /public/media/*.gml
+fastapi_backend/static/layers/layer_category_39892.geojson
+frontend/public/static/layer_category_39892.gml
