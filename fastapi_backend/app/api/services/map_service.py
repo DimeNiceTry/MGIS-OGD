@@ -118,14 +118,7 @@ def get_all_available_layers(db: Session) -> List[MapLayer]:
     """
     from pathlib import Path
     
-    # 1. Получение слоев из БД (если используются)
-    try:
-        db_layers = get_map_layers(db)
-    except Exception as e:
-        print(f"Ошибка при получении слоев из БД: {str(e)}")
-        db_layers = []
-    
-    # 2. Поиск статических слоев в директории static/layers
+    # Находим только слой layer_category_39892
     static_layers = []
     static_dirs = [
         Path("/app/fastapi_backend/static/layers"), 
@@ -144,62 +137,28 @@ def get_all_available_layers(db: Session) -> List[MapLayer]:
         print("Не найдена директория со статичными слоями.")
     
     if static_dir and static_dir.exists():
-        for file_path in static_dir.glob("*.geojson"):
-            layer_id = f"static_{file_path.stem}"
-            layer_name = file_path.stem.replace("_", " ").title()
+        # Ищем только файл layer_category_39892.geojson
+        target_filename = "layer_category_39892.geojson"
+        target_path = static_dir / target_filename
+        
+        if target_path.exists():
+            layer_id = "static_layer_category_39892"
+            # Переименовываем слой
+            layer_name = "Муниципальные образования РФ"
             
             # Создаем слой без сохранения в БД
             static_layer = MapLayer(
                 id=layer_id,
                 name=layer_name,
-                description=f"Статический слой из файла {file_path.name}",
+                description="Муниципальные образования Российской Федерации",
                 source_type="static",
-                source_url=f"/static/layers/{file_path.name}",
+                source_url=f"/static/layers/{target_filename}",
                 style={"fillColor": "#0080ff", "fillOpacity": 0.5, "outlineColor": "#000"}
             )
             static_layers.append(static_layer)
-            print(f"Добавлен статический слой: {layer_id} из файла {file_path}")
+            print(f"Добавлен статический слой: {layer_id} из файла {target_path}")
     
-    # 3. Добавление слоев НСПД (если нужны дополнительные слои НСПД)
-    nspd_layers = [
-        MapLayer(
-            id="nspd_cad_del",
-            name="Кадастровые деления",
-            description="Кадастровые деления из НСПД",
-            source_type="nspd",
-            source_url="/api/nspd/thematic-search/?thematic_search=cad_del&query=",
-            style={"fillColor": "#FF5733", "fillOpacity": 0.5, "outlineColor": "#000"}
-        ),
-        MapLayer(
-            id="nspd_admin_del",
-            name="Административные деления",
-            description="Административные деления из НСПД",
-            source_type="nspd",
-            source_url="/api/nspd/thematic-search/?thematic_search=admin_del&query=",
-            style={"fillColor": "#33FF57", "fillOpacity": 0.5, "outlineColor": "#000"}
-        ),
-        MapLayer(
-            id="nspd_zouit",
-            name="ЗОУИТ",
-            description="Зоны с особыми условиями использования территорий из НСПД",
-            source_type="nspd",
-            source_url="/api/nspd/thematic-search/?thematic_search=zouit&query=",
-            style={"fillColor": "#3357FF", "fillOpacity": 0.5, "outlineColor": "#000"}
-        ),
-        MapLayer(
-            id="nspd_ter_zone",
-            name="Территориальные зоны",
-            description="Территориальные зоны из НСПД",
-            source_type="nspd",
-            source_url="/api/nspd/thematic-search/?thematic_search=ter_zone&query=",
-            style={"fillColor": "#AA33FF", "fillOpacity": 0.5, "outlineColor": "#000"}
-        )
-    ]
-    
-    # Объединяем все слои
-    all_layers = db_layers + static_layers + nspd_layers
-    
-    return all_layers
+    return static_layers
 
 def get_layer_by_id(db: Session, layer_id: str) -> Optional[Dict[str, Any]]:
     """

@@ -429,14 +429,36 @@ const Map = () => {
         
         if (cachedLayers) {
           console.log('Использую кэшированные слои:', cachedLayers);
-          setAvailableLayers(cachedLayers);
+          // Фильтруем слои, оставляя только Layer Category 39892
+          let filteredLayers = cachedLayers.filter(layer => 
+            layer.id === 'static_layer_category_39892'
+          );
+          
+          // Если нужный слой не найден, создаем его вручную
+          if (filteredLayers.length === 0) {
+            const defaultLayer = {
+              id: 'static_layer_category_39892',
+              name: 'Муниципальные образования РФ',
+              description: 'Муниципальные образования Российской Федерации',
+              source_type: 'static',
+              source_url: '/static/layers/layer_category_39892.geojson',
+              style: {"fillColor": "#0080ff", "fillOpacity": 0.5, "outlineColor": "#000"}
+            };
+            filteredLayers = [defaultLayer];
+            console.log('Слой категории 39892 не найден в кэше, добавлен вручную');
+          } else {
+            // Изменяем название слоя
+            filteredLayers[0].name = 'Муниципальные образования РФ';
+          }
+          
+          setAvailableLayers(filteredLayers);
           
           // Проверяем валидность списка видимых слоев
           const cachedVisibleLayers = getFromCache('visible_layers');
           if (cachedVisibleLayers) {
             // Убедимся, что все видимые слои существуют в списке доступных
             const validVisibleLayers = cachedVisibleLayers.filter(
-              layerId => cachedLayers.some(layer => layer.id === layerId)
+              layerId => filteredLayers.some(layer => layer.id === layerId)
             );
             setVisibleLayers(validVisibleLayers);
           }
@@ -452,24 +474,38 @@ const Map = () => {
           console.log('Заголовки ответа:', response.headers);
           console.log('Получен ответ от сервера:', response.data);
           
-          // Выведем список статических слоев для отладки
-          if (Array.isArray(response.data)) {
-            const staticLayers = response.data.filter(layer => layer.source_type === 'static');
-            console.log('Статические слои из ответа:', staticLayers);
-            if (staticLayers.length > 0) {
-              console.log('URL первого статического слоя:', staticLayers[0].source_url);
-            }
-          }
-          
           if (response.data) {
             if (Array.isArray(response.data)) {
               console.log(`Получено ${response.data.length} слоев`);
-              setAvailableLayers(response.data);
-              saveToCache('available_layers', response.data);
+              
+              // Фильтруем слои, оставляя только Layer Category 39892
+              let filteredLayers = response.data.filter(layer => 
+                layer.id === 'static_layer_category_39892'
+              );
+              
+              // Если нужный слой не найден, создаем его вручную
+              if (filteredLayers.length === 0) {
+                const defaultLayer = {
+                  id: 'static_layer_category_39892',
+                  name: 'Муниципальные образования РФ',
+                  description: 'Муниципальные образования Российской Федерации',
+                  source_type: 'static',
+                  source_url: '/static/layers/layer_category_39892.geojson',
+                  style: {"fillColor": "#0080ff", "fillOpacity": 0.5, "outlineColor": "#000"}
+                };
+                filteredLayers = [defaultLayer];
+                console.log('Слой категории 39892 не найден в ответе сервера, добавлен вручную');
+              } else {
+                // Изменяем название слоя
+                filteredLayers[0].name = 'Муниципальные образования РФ';
+              }
+              
+              setAvailableLayers(filteredLayers);
+              saveToCache('available_layers', filteredLayers);
               
               // Проверяем валидность списка видимых слоев после получения новых данных
               const validVisibleLayers = visibleLayers.filter(
-                layerId => response.data.some(layer => layer.id === layerId)
+                layerId => filteredLayers.some(layer => layer.id === layerId)
               );
               
               // Обновляем видимые слои, если есть изменения
@@ -496,10 +532,42 @@ const Map = () => {
         // Если ошибка, проверяем кэш
         const cachedLayers = getFromCache('available_layers');
         if (cachedLayers) {
-          setAvailableLayers(cachedLayers);
+          // Фильтруем кэшированные слои
+          let filteredLayers = cachedLayers.filter(layer => 
+            layer.id === 'static_layer_category_39892'
+          );
+          
+          // Если нужный слой не найден, создаем его вручную
+          if (filteredLayers.length === 0) {
+            const defaultLayer = {
+              id: 'static_layer_category_39892',
+              name: 'Муниципальные образования РФ',
+              description: 'Муниципальные образования Российской Федерации',
+              source_type: 'static',
+              source_url: '/static/layers/layer_category_39892.geojson',
+              style: {"fillColor": "#0080ff", "fillOpacity": 0.5, "outlineColor": "#000"}
+            };
+            filteredLayers = [defaultLayer];
+            console.log('Слой категории 39892 не найден в кэше при ошибке, добавлен вручную');
+          } else {
+            // Изменяем название слоя
+            filteredLayers[0].name = 'Муниципальные образования РФ';
+          }
+          
+          setAvailableLayers(filteredLayers);
           message.info('Используются кэшированные слои из-за ошибки сети');
         } else {
-          message.error('Не удалось загрузить список доступных слоев');
+          // Если нет кэша, создаем слой вручную
+          const defaultLayer = {
+            id: 'static_layer_category_39892',
+            name: 'Муниципальные образования РФ',
+            description: 'Муниципальные образования Российской Федерации',
+            source_type: 'static',
+            source_url: '/static/layers/layer_category_39892.geojson',
+            style: {"fillColor": "#0080ff", "fillOpacity": 0.5, "outlineColor": "#000"}
+          };
+          setAvailableLayers([defaultLayer]);
+          message.info('Используется стандартный слой, так как не удалось загрузить данные с сервера');
         }
       }
     };
