@@ -10,16 +10,42 @@
     {
       "src": "logo192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
     },
     {
       "src": "logo512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "background_color": "#ffffff",
+  "prefer_related_applications": false,
+  "categories": ["maps", "utilities", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Карта",
+      "short_name": "Карта",
+      "description": "Открыть карту",
+      "url": "/",
+      "icons": [{"src": "logo192.png", "sizes": "192x192"}]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshot1.png",
+      "sizes": "1280x720",
+      "type": "image/png"
+    }
+  ],
+  "related_applications": [],
+  "lang": "ru",
+  "dir": "ltr",
+  "gcm_sender_id": "",
+  "scope": "/"
 }

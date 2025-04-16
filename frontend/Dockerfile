@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # Установка зависимостей
-RUN npm ci
+RUN npm install
 
 # Копирование исходников
 COPY . .
@@ -21,6 +21,7 @@ RUN echo "Building frontend application..."
 # Установка переменных окружения для сборки
 ENV PUBLIC_URL=""
 ENV GENERATE_SOURCEMAP=false
+ENV REACT_APP_API_URL=/api
 
 # Сборка приложения
 RUN npm run build

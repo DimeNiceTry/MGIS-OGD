@@ -40,5 +40,62 @@
       To begin the development, run `npm start` or `yarn start`.
       To create a production bundle, use `npm run build` or `yarn build`.
     -->
+    <script>
+      // Регистрация Service Worker для PWA
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then(function(registration) {
+              console.log('ServiceWorker успешно зарегистрирован со scope: ', registration.scope);
+              
+              // Обработка обновлений Service Worker
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // Новая версия доступна
+                    if (confirm('Доступна новая версия приложения. Обновить сейчас?')) {
+                      window.location.reload();
+                    }
+                  }
+                });
+              });
+            })
+            .catch(function(error) {
+              console.error('Ошибка при регистрации ServiceWorker: ', error);
+            });
+            
+          // Добавляем обработчик оффлайн/онлайн статуса
+          window.addEventListener('online', function() {
+            document.body.classList.remove('offline');
+            console.log('Приложение снова онлайн');
+            // Можно показать уведомление пользователю
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('MGIS OGD', {
+                body: 'Подключение к сети восстановлено. Данные будут обновлены.',
+                icon: '/logo192.png'
+              });
+            }
+          });
+          
+          window.addEventListener('offline', function() {
+            document.body.classList.add('offline');
+            console.log('Приложение перешло в оффлайн-режим');
+            // Можно показать уведомление пользователю
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('MGIS OGD', {
+                body: 'Подключение к сети потеряно. Приложение работает в оффлайн-режиме.',
+                icon: '/logo192.png'
+              });
+            }
+          });
+          
+          // Запрашиваем разрешение на уведомления
+          if ('Notification' in window && Notification.permission !== 'denied') {
+            Notification.requestPermission();
+          }
+        });
+      }
+    </script>
   </body>
 </html>
