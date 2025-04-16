@@ -27,3 +27,4 @@ yarn-error.log*
 /public/media/*.gml
 fastapi_backend/static/layers/layer_category_39892.geojson
 frontend/public/static/layer_category_39892.gml
+fastapi_backend/static/layers/layer_category_39892.geojson
