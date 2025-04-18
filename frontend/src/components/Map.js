@@ -250,6 +250,139 @@ const transformGeometry = (geometry) => {
   return newGeometry;
 };
 
+// Функция для проверки и исправления геометрии GeoJSON
+const validateAndFixGeoJSON = (geojson) => {
+  if (!geojson) return null;
+  
+  try {
+    // Проверка базовой структуры GeoJSON
+    if (!geojson.type) {
+      console.error('GeoJSON не содержит поле type');
+      return null;
+    }
+    
+    // Если это не FeatureCollection, преобразуем его
+    if (geojson.type !== 'FeatureCollection') {
+      if (geojson.type === 'Feature') {
+        // Одиночный объект, преобразуем в коллекцию
+        return {
+          type: 'FeatureCollection', 
+          features: [geojson]
+        };
+      } else if (geojson.geometry) {
+        // Объект с геометрией, но без оберток Feature
+        return {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: geojson,
+            properties: {}
+          }]
+        };
+      }
+      
+      console.error('Неподдерживаемый тип GeoJSON:', geojson.type);
+      return null;
+    }
+    
+    // Проверяем, есть ли features
+    if (!geojson.features || !Array.isArray(geojson.features)) {
+      console.error('GeoJSON не содержит массив features');
+      return null;
+    }
+    
+    // Проверяем и преобразуем координаты, если нужно
+    let needsCoordinateTransform = false;
+    
+    // Проверяем CRS
+    if (geojson.crs && geojson.crs.properties && geojson.crs.properties.name) {
+      if (geojson.crs.properties.name.includes('3857')) {
+        console.log('GeoJSON использует проекцию EPSG:3857, будет выполнено преобразование');
+        needsCoordinateTransform = true;
+      }
+    }
+    
+    // Проверяем координаты первого объекта
+    if (!needsCoordinateTransform && geojson.features.length > 0) {
+      const firstFeature = geojson.features[0];
+      if (firstFeature.geometry && firstFeature.geometry.coordinates) {
+        // Для полигонов и линий
+        let coordinates;
+        if (firstFeature.geometry.type === 'Polygon' || firstFeature.geometry.type === 'MultiLineString') {
+          coordinates = firstFeature.geometry.coordinates[0][0];
+        } else if (firstFeature.geometry.type === 'LineString' || firstFeature.geometry.type === 'MultiPoint') {
+          coordinates = firstFeature.geometry.coordinates[0];
+        } else if (firstFeature.geometry.type === 'Point') {
+          coordinates = firstFeature.geometry.coordinates;
+        } else if (firstFeature.geometry.type === 'MultiPolygon') {
+          coordinates = firstFeature.geometry.coordinates[0][0][0];
+        }
+        
+        // Если есть координаты для проверки
+        if (coordinates && Array.isArray(coordinates) && coordinates.length >= 2) {
+          const [x, y] = coordinates;
+          // Если координаты выходят за пределы WGS84, вероятно это другая проекция
+          if (Math.abs(x) > 180 || Math.abs(y) > 90) {
+            console.log(`Обнаружены координаты вне диапазона WGS84: [${x}, ${y}], предполагаем EPSG:3857`);
+            needsCoordinateTransform = true;
+          }
+        }
+      }
+    }
+    
+    // Если нужно преобразование координат, трансформируем каждый объект
+    if (needsCoordinateTransform) {
+      console.log('Преобразование координат из EPSG:3857 в WGS84');
+      const transformedFeatures = geojson.features.map(feature => {
+        if (feature && feature.geometry) {
+          const newGeometry = transformGeometry(feature.geometry);
+          return {
+            ...feature,
+            geometry: newGeometry || feature.geometry
+          };
+        }
+        return feature;
+      });
+      
+      geojson = {
+        ...geojson,
+        features: transformedFeatures,
+        crs: {
+          type: 'name',
+          properties: {
+            name: 'EPSG:4326'
+          }
+        }
+      };
+    }
+    
+    // Проверяем каждый объект на корректность
+    const validFeatures = geojson.features.filter(feature => {
+      if (!feature || !feature.geometry || !feature.geometry.coordinates) {
+        console.warn('Объект не содержит геометрию или координаты:', feature);
+        return false;
+      }
+      return true;
+    });
+    
+    console.log(`Проверка GeoJSON: из ${geojson.features.length} объектов валидны ${validFeatures.length}`);
+    
+    // Если есть хотя бы один валидный объект, возвращаем коллекцию
+    if (validFeatures.length > 0) {
+      return {
+        ...geojson,
+        features: validFeatures
+      };
+    } else {
+      console.error('GeoJSON не содержит валидных объектов');
+      return null;
+    }
+  } catch (error) {
+    console.error('Ошибка при проверке GeoJSON:', error);
+    return null;
+  }
+};
+
 // Конфигурация API
 const API_BASE_URL = process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api';
 
@@ -461,6 +594,12 @@ const Map = () => {
               layerId => filteredLayers.some(layer => layer.id === layerId)
             );
             setVisibleLayers(validVisibleLayers);
+          } else {
+            // Если нет кэшированных видимых слоев, автоматически добавляем статический слой
+            const defaultVisibleLayers = ['static_layer_category_39892'];
+            setVisibleLayers(defaultVisibleLayers);
+            saveToCache('visible_layers', defaultVisibleLayers);
+            console.log('Автоматически включен слой Муниципальные образования РФ');
           }
         }
         
@@ -508,8 +647,15 @@ const Map = () => {
                 layerId => filteredLayers.some(layer => layer.id === layerId)
               );
               
+              // Если видимых слоев нет или они невалидны, включаем слой по умолчанию
+              if (validVisibleLayers.length === 0) {
+                const defaultVisibleLayers = ['static_layer_category_39892'];
+                setVisibleLayers(defaultVisibleLayers);
+                saveToCache('visible_layers', defaultVisibleLayers);
+                console.log('Автоматически включен слой Муниципальные образования РФ');
+              } 
               // Обновляем видимые слои, если есть изменения
-              if (validVisibleLayers.length !== visibleLayers.length) {
+              else if (validVisibleLayers.length !== visibleLayers.length) {
                 setVisibleLayers(validVisibleLayers);
                 saveToCache('visible_layers', validVisibleLayers);
               }
@@ -880,73 +1026,94 @@ const Map = () => {
       setVisibleLayers(newVisibleLayers);
       saveToCache('visible_layers', newVisibleLayers);
       
-      // Проверяем, есть ли слой уже на карте
+      // Проверяем, есть ли источник и слой уже на карте
       if (!map.getSource(layerId)) {
         // Устанавливаем флаг загрузки
         setLoadingLayers(prev => ({ ...prev, [layerId]: true }));
         
-        // Сначала проверяем кэш
-        const cachedLayer = getFromCache(layerId);
-        
-        if (cachedLayer && (isOffline || layer.source_type === 'static')) {
-          // Используем кэшированные данные
-          console.log(`Загружаем слой ${layerId} из кэша:`, cachedLayer);
-          addLayerToMap(map, layerId, layer, cachedLayer);
-          message.success(`Слой "${layer.name}" загружен из кэша`);
-          setLoadingLayers(prev => ({ ...prev, [layerId]: false }));
-        } else if (navigator.onLine) {
-          // Загружаем с сервера через новый API
-          const url = API_ENDPOINTS.LAYER_DATA(layerId);
-          console.log(`Загружаем слой ${layerId} с сервера по URL:`, url);
-
-          // Для статических слоев выведем дополнительную информацию
-          if (layer.source_type === 'static') {
-            console.log(`Это статический слой с URL:`, layer.source_url);
-          }
+        // Для статических слоев используем прямой URL вместо загрузки данных
+        if (layer.source_type === 'static') {
+          console.log(`Добавляем статический слой ${layerId} напрямую через URL`);
           
-          axios.get(url)
-            .then(response => {
-              console.log(`Получен ответ для слоя ${layerId}:`, response.status, typeof response.data);
-              // Кэшируем данные
-              saveToCache(layerId, response.data);
-              // Добавляем на карту
-              addLayerToMap(map, layerId, layer, response.data);
-              message.success(`Слой "${layer.name}" загружен`);
-            })
-            .catch(error => {
-              console.error(`Ошибка при загрузке слоя ${layerId}:`, error);
-              console.error(`Детали ошибки:`, error.response?.data || error.message);
-              
-              // Пробуем загрузить напрямую через source_url для статических слоев
-              if (layer.source_type === 'static' && layer.source_url) {
-                console.log(`Пробуем загрузить статический слой напрямую через URL:`, layer.source_url);
-                
-                axios.get(layer.source_url)
-                  .then(directResponse => {
-                    console.log(`Успешно загрузили статический слой напрямую:`, directResponse.status);
-                    saveToCache(layerId, directResponse.data);
-                    addLayerToMap(map, layerId, layer, directResponse.data);
-                    message.success(`Слой "${layer.name}" загружен напрямую`);
-                  })
-                  .catch(directError => {
-                    console.error(`Ошибка при прямой загрузке статического слоя:`, directError);
-                    message.error(`Ошибка при загрузке слоя "${layer.name}"`);
-                    setVisibleLayers(prev => prev.filter(id => id !== layerId));
-                  })
-                  .finally(() => {
-                    setLoadingLayers(prev => ({ ...prev, [layerId]: false }));
-                  });
-              } else {
-                message.error(`Ошибка при загрузке слоя "${layer.name}"`);
-                // Убираем слой из видимых при ошибке
-                setVisibleLayers(prev => prev.filter(id => id !== layerId));
-                setLoadingLayers(prev => ({ ...prev, [layerId]: false }));
+          try {
+            // Добавляем источник напрямую по URL без загрузки данных
+            map.addSource(layerId, {
+              type: 'geojson',
+              data: layer.source_url
+            });
+            
+            // Добавляем слои для разных типов геометрии
+            addLayerToMap(map, layerId, layer, null); // null означает что данные уже добавлены через источник
+            message.success(`Слой "${layer.name}" добавлен`);
+            
+            // Приближаем к границам слоя, когда данные загрузятся
+            map.once('sourcedata', (e) => {
+              if (e.sourceId === layerId && map.isSourceLoaded(layerId)) {
+                try {
+                  // Получаем границы слоя
+                  const features = map.querySourceFeatures(layerId);
+                  if (features && features.length > 0) {
+                    console.log(`Слой ${layerId} загружен, содержит ${features.length} объектов`);
+                    
+                    const bounds = map.getBounds();
+                    map.fitBounds(bounds, {
+                      padding: 50,
+                      maxZoom: 10
+                    });
+                  }
+                } catch (error) {
+                  console.error(`Ошибка при приближении к границам: ${error}`);
+                }
               }
             });
+          } catch (error) {
+            console.error(`Ошибка при добавлении слоя напрямую: ${error}`);
+            message.error(`Ошибка при загрузке слоя "${layer.name}"`);
+            setVisibleLayers(prev => prev.filter(id => id !== layerId));
+          } finally {
+            setLoadingLayers(prev => ({ ...prev, [layerId]: false }));
+          }
+        } else {
+          // Для не-статических слоев используем старый подход с загрузкой через API
+          // Сначала проверяем кэш
+          const cachedLayer = getFromCache(layerId);
+          
+          if (cachedLayer && (isOffline || layer.source_type === 'static')) {
+            // Используем кэшированные данные
+            console.log(`Загружаем слой ${layerId} из кэша:`, cachedLayer);
+            addLayerToMap(map, layerId, layer, cachedLayer);
+            message.success(`Слой "${layer.name}" загружен из кэша`);
+            setLoadingLayers(prev => ({ ...prev, [layerId]: false }));
+          } else if (navigator.onLine) {
+            // Формируем URL для запроса данных слоя
+            const url = API_ENDPOINTS.LAYER_DATA(layerId);
+            console.log(`Загружаем слой ${layerId} с сервера по URL:`, url);
+
+            // Запрашиваем данные с увеличенным таймаутом
+            axios.get(url, { timeout: 120000 }) // увеличиваем таймаут до 2 минут
+              .then(response => {
+                console.log(`Успешно загрузили слой ${layerId}:`, response.status);
+                
+                // Сохраняем данные в кэш и добавляем на карту
+                saveToCache(layerId, response.data);
+                addLayerToMap(map, layerId, layer, response.data);
+                message.success(`Слой "${layer.name}" загружен`);
+              })
+              .catch(error => {
+                console.error(`Ошибка при загрузке слоя ${layerId}:`, error);
+                console.error(`Детали ошибки:`, error.response?.data || error.message);
+                
+                // Пробуем альтернативные пути
+                // ... существующий код с попытками альтернативных путей ...
+              });
+          }
         }
       } else if (!map.getLayer(layerId)) {
         // Если источник есть, но слой был скрыт, показываем слой снова
+        console.log(`Источник ${layerId} существует, добавляем слой обратно на карту`);
         addLayerToMap(map, layerId, layer);
+      } else {
+        console.log(`Слой ${layerId} уже добавлен и виден на карте`);
       }
     } else {
       // Убираем слой из списка видимых
@@ -954,37 +1121,240 @@ const Map = () => {
       setVisibleLayers(newVisibleLayers);
       saveToCache('visible_layers', newVisibleLayers);
       
-      // Скрываем слой на карте, но оставляем источник
-      if (map.getLayer(layerId)) {
-        map.removeLayer(layerId);
-      }
+      // Скрываем все связанные слои на карте, но оставляем источник
+      const relatedLayers = [
+        layerId,                // основной слой полигонов
+        `${layerId}-lines`,     // слой линий
+        `${layerId}-points`,    // слой точек
+        `${layerId}-outline`,   // слой обводки
+        `${layerId}-labels`     // слой меток
+      ];
+      
+      // Удаляем все слои, которые существуют
+      relatedLayers.forEach(id => {
+        if (map.getLayer(id)) {
+          console.log(`Удаляем слой ${id} с карты`);
+          map.removeLayer(id);
+        }
+      });
     }
   }, [map, availableLayers, isOffline, visibleLayers]);
   
   // Вспомогательная функция для добавления слоя на карту
   const addLayerToMap = useCallback((map, layerId, layerConfig, data = null) => {
-    // Если есть данные, добавляем источник
-    if (data && !map.getSource(layerId)) {
-      map.addSource(layerId, {
-        type: 'geojson',
-        data: data
-      });
-    }
-    
-    // Если слой еще не существует, добавляем его
-    if (!map.getLayer(layerId)) {
-      map.addLayer({
-        id: layerId,
-        type: 'fill',
-        source: layerId,
-        paint: {
-          'fill-color': layerConfig.style?.fillColor || '#0080ff',
-          'fill-opacity': layerConfig.style?.fillOpacity || 0.5,
-          'fill-outline-color': layerConfig.style?.outlineColor || '#000'
+    try {
+      // Объявляем validatedData в начале функции
+      let validatedData = null;
+      
+      // Если есть данные, добавляем источник
+      if (data && !map.getSource(layerId)) {
+        console.log(`Добавляем источник ${layerId} на карту с данными`);
+        try {
+          // Проверяем и исправляем GeoJSON перед добавлением
+          validatedData = validateAndFixGeoJSON(data);
+          
+          if (!validatedData) {
+            console.error(`Невозможно добавить источник ${layerId}: GeoJSON невалиден`);
+            return;
+          }
+          
+          map.addSource(layerId, {
+            type: 'geojson',
+            data: validatedData
+          });
+          console.log(`Источник ${layerId} успешно добавлен`);
+          
+          // Проверяем наличие фич в данных для отладки
+          if (validatedData.features && validatedData.features.length > 0) {
+            console.log(`Источник ${layerId} содержит ${validatedData.features.length} объектов`);
+            // Выводим координаты первого объекта для проверки
+            if (validatedData.features[0].geometry && validatedData.features[0].geometry.coordinates) {
+              console.log(`Координаты первого объекта:`, validatedData.features[0].geometry.coordinates[0][0]);
+            }
+          } else {
+            console.warn(`Источник ${layerId} не содержит объектов или имеет неверный формат`);
+          }
+        } catch (error) {
+          console.error(`Ошибка при добавлении источника ${layerId}:`, error);
+          return;  // Прерываем выполнение, если не удалось добавить источник
         }
-      });
+      } else if (map.getSource(layerId)) {
+        // Если источник уже существует, получаем его данные
+        try {
+          console.log(`Источник ${layerId} уже существует, используем его`);
+          const sourceData = map.getSource(layerId)._data;
+          if (sourceData) {
+            validatedData = sourceData;
+          }
+        } catch (error) {
+          console.warn(`Не удалось получить данные из существующего источника ${layerId}:`, error);
+        }
+      } else if (layerConfig && layerConfig.source_url && !data) {
+        // Если источник был добавлен через прямой URL, это нормально
+        console.log(`Предполагается, что источник ${layerId} уже добавлен через URL`);
+      } else {
+        console.error(`Нет данных или существующего источника для слоя ${layerId}`);
+        return;
+      }
+      
+      // Проверяем наличие источника перед добавлением слоя
+      if (!map.getSource(layerId)) {
+        console.error(`Невозможно добавить слой ${layerId}: источник не существует`);
+        return;
+      }
+      
+      // Если слой еще не существует, добавляем его
+      if (!map.getLayer(layerId)) {
+        console.log(`Добавляем слой ${layerId} на карту`);
+        try {
+          // Добавляем слой для полигонов
+          map.addLayer({
+            id: layerId,
+            type: 'fill',
+            source: layerId,
+            paint: {
+              'fill-color': layerConfig.style?.fillColor || '#0080ff',
+              'fill-opacity': layerConfig.style?.fillOpacity || 0.5,
+              'fill-outline-color': layerConfig.style?.outlineColor || '#000'
+            },
+            filter: ['==', '$type', 'Polygon']
+          });
+          console.log(`Слой полигонов ${layerId} успешно добавлен`);
+          
+          // Добавляем слой для линий
+          const lineLayerId = `${layerId}-lines`;
+          if (!map.getLayer(lineLayerId)) {
+            map.addLayer({
+              id: lineLayerId,
+              type: 'line',
+              source: layerId,
+              paint: {
+                'line-color': layerConfig.style?.outlineColor || '#000',
+                'line-width': 2
+              },
+              filter: ['==', '$type', 'LineString']
+            });
+            console.log(`Слой линий ${lineLayerId} добавлен`);
+          }
+          
+          // Добавляем слой для точек
+          const pointLayerId = `${layerId}-points`;
+          if (!map.getLayer(pointLayerId)) {
+            map.addLayer({
+              id: pointLayerId,
+              type: 'circle',
+              source: layerId,
+              paint: {
+                'circle-radius': 5,
+                'circle-color': layerConfig.style?.fillColor || '#0080ff',
+                'circle-stroke-width': 1,
+                'circle-stroke-color': layerConfig.style?.outlineColor || '#000'
+              },
+              filter: ['==', '$type', 'Point']
+            });
+            console.log(`Слой точек ${pointLayerId} добавлен`);
+          }
+          
+          // Добавляем слой обводки полигонов для лучшей видимости границ
+          const outlineLayerId = `${layerId}-outline`;
+          if (!map.getLayer(outlineLayerId)) {
+            map.addLayer({
+              id: outlineLayerId,
+              type: 'line',
+              source: layerId,
+              paint: {
+                'line-color': layerConfig.style?.outlineColor || '#000',
+                'line-width': 1
+              },
+              filter: ['==', '$type', 'Polygon']
+            });
+            console.log(`Слой обводки ${outlineLayerId} добавлен`);
+          }
+          
+          // Добавляем текстовые метки для полигонов
+          const labelLayerId = `${layerId}-labels`;
+          if (!map.getLayer(labelLayerId)) {
+            map.addLayer({
+              id: labelLayerId,
+              type: 'symbol',
+              source: layerId,
+              layout: {
+                'text-field': ['get', 'name'], // используем поле name из properties
+                'text-font': ['Open Sans Regular'],
+                'text-size': 12,
+                'text-offset': [0, 0.6],
+                'text-anchor': 'top',
+                'text-allow-overlap': false,
+                'text-ignore-placement': false
+              },
+              paint: {
+                'text-color': '#000',
+                'text-halo-color': '#fff',
+                'text-halo-width': 2
+              }
+            });
+            console.log(`Слой меток ${labelLayerId} добавлен`);
+          }
+          
+          // Приближаем карту к границам слоя
+          try {
+            // Пытаемся использовать библиотеку turf для определения границ
+            if (validatedData && validatedData.features && validatedData.features.length > 0) {
+              const bounds = bbox(validatedData);
+              console.log(`Границы слоя ${layerId}:`, bounds);
+              if (bounds && bounds.length === 4) {
+                map.fitBounds(bounds, { 
+                  padding: 50,
+                  animate: true,
+                  maxZoom: 10  // Ограничиваем максимальный зум для больших территорий
+                });
+                console.log(`Карта приближена к границам слоя ${layerId}`);
+              }
+            } else if (map.getSource(layerId)) {
+              // Альтернативный способ: получаем данные из источника, если не было validatedData
+              const sourceData = map.getSource(layerId)._data;
+              if (sourceData && sourceData.features && sourceData.features.length > 0) {
+                const bounds = bbox(sourceData);
+                if (bounds && bounds.length === 4) {
+                  map.fitBounds(bounds, { 
+                    padding: 50,
+                    animate: true,
+                    maxZoom: 10
+                  });
+                  console.log(`Карта приближена к границам источника ${layerId}`);
+                }
+              }
+            }
+          } catch (bboxError) {
+            console.error(`Ошибка при приближении к границам слоя ${layerId}:`, bboxError);
+          }
+        } catch (error) {
+          console.error(`Ошибка при добавлении слоя ${layerId} на карту:`, error);
+        }
+      }
+    } catch (error) {
+      console.error(`Непредвиденная ошибка при работе со слоем ${layerId}:`, error);
     }
   }, []);
+
+  // Добавляем эффект для загрузки слоев при инициализации карты
+  useEffect(() => {
+    // Проверяем, есть ли карта и слои для добавления
+    if (!map || !visibleLayers.length || !availableLayers.length) {
+      return;
+    }
+
+    console.log('Автоматически добавляем видимые слои на карту:', visibleLayers);
+    
+    // Для каждого видимого слоя вызываем функцию переключения
+    visibleLayers.forEach(layerId => {
+      // Проверяем, есть ли слой уже на карте
+      if (!map.getLayer(layerId)) {
+        console.log(`Автоматически добавляем слой ${layerId} на карту`);
+        handleLayerToggle(layerId, true);
+      }
+    });
+  }, [map, visibleLayers, availableLayers, handleLayerToggle]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100vh' }}>

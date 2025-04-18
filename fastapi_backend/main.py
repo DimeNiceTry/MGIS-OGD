@@ -5,7 +5,10 @@ from app.api.endpoints import maps, nspd
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import logging
+import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,27 @@ app = FastAPI(
     description="API для работы с НСПД и статичными слоями",
     version="1.0.0"
 )
+
+# Монтируем статические файлы из разных возможных директорий
+static_dirs = [
+    Path("static"),
+    Path("fastapi_backend/static"),
+    Path("/app/static"),
+    Path("/app/fastapi_backend/static")
+]
+
+static_dir = None
+for path in static_dirs:
+    if path.exists():
+        static_dir = path
+        logger.info(f"Найдена статическая директория: {static_dir}")
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        break
+else:
+    logger.warning("Статическая директория не найдена!")
+    # Создаем пустую директорию для статических файлов
+    os.makedirs("static", exist_ok=True)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Настройка CORS
 app.add_middleware(
